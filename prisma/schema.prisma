@@ -1,0 +1,98 @@
+// Skema database Marketplace Bot
+// Lihat CLAUDE.md untuk penjelasan data model & keputusan desain.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ===== Enums =====
+
+enum ListingType {
+  SELL // user menjual barang
+  BUY  // user mencari/ingin membeli barang
+}
+
+enum ListingStatus {
+  ACTIVE    // tampil di marketplace, menerima offer/buy
+  PENDING   // sudah ada deal, menunggu trade in-game selesai
+  COMPLETED // trade selesai
+  CANCELLED // dibatalkan creator
+  EXPIRED   // kadaluarsa (Fase 2)
+}
+
+enum OfferStatus {
+  
+  PENDING   // menunggu respons creator listing
+  ACCEPTED  // diterima → jadi transaksi
+  REJECTED  // ditolak (manual atau otomatis saat offer lain diterima)
+  WITHDRAWN // ditarik kembali oleh pembuat offer (Fase 2)
+}
+
+enum TransactionStatus {
+  AGREED    // deal tercapai, menunggu trade in-game
+  COMPLETED // trade in-game selesai
+}
+
+// ===== Models =====
+
+model Listing {
+  id          Int           @id @default(autoincrement())
+  creatorId   String // Discord user ID
+  type        ListingType
+  itemName    String
+  quantity    Int           @default(1)
+  price       String // teks bebas, mis. "64 diamond"
+  description String?
+  status      ListingStatus @default(ACTIVE)
+  messageId   String? // ID embed di channel marketplace (utk update tampilan)
+  createdAt   DateTime      @default(now())
+  expiresAt   DateTime? // opsional (Fase 2)
+
+  offers       Offer[]
+  transactions Transaction[]
+
+  @@index([status])
+  @@index([creatorId])
+  @@index([itemName])
+}
+
+model Offer {
+  id           Int         @id @default(autoincrement())
+  listingId    Int
+  buyerId      String // Discord user ID pembuat offer
+  offeredPrice String // teks bebas
+  message      String?
+  status       OfferStatus @default(PENDING)
+  createdAt    DateTime    @default(now())
+
+  listing      Listing       @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+
+  @@index([listingId])
+  @@index([buyerId])
+  @@index([status])
+}
+
+model Transaction {
+  id          Int               @id @default(autoincrement())
+  listingId   Int
+  offerId     Int? // NULL kalau Buy Now (tanpa offer)
+  sellerId    String // pihak yang melepas barang
+  buyerId     String // pihak yang menerima barang
+  finalPrice  String
+  status      TransactionStatus @default(AGREED)
+  createdAt   DateTime          @default(now())
+  completedAt DateTime?
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  offer   Offer?  @relation(fields: [offerId], references: [id], onDelete: SetNull)
+
+  @@index([listingId])
+  @@index([sellerId])
+  @@index([buyerId])
+}

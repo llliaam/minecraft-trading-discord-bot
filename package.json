@@ -1,0 +1,25 @@
+{
+  "name": "minecraft-marketplace-bot",
+  "version": "1.0.0",
+  "description": "Discord bot untuk manajemen jual-beli item Minecraft di server SMP",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "deploy": "node src/deploy-commands.js",
+    "db:push": "prisma db push",
+    "db:generate": "prisma generate",
+    "db:studio": "prisma studio"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.1.0",
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.7"
+  },
+  "devDependencies": {
+    "prisma": "^6.1.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
