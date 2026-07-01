@@ -8,6 +8,8 @@ import { config } from "./lib/config.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+
+
 async function collectCommands() {
   const commandsPath = join(__dirname, "commands");
   const commands = [];

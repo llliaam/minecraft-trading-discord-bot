@@ -18,7 +18,7 @@ export default {
     ),
 
   async execute(interaction) {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const type = interaction.options.getString("type") ?? undefined;
     const page = await browseListings({ type, page: 1 });
 

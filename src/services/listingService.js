@@ -81,9 +81,11 @@ export async function browseListings({ type, page = 1 } = {}) {
  * @returns {Promise<{items: object[], total: number, page: number, totalPages: number}>}
  */
 export async function searchListings({ query, type, limit = 10 }) {
+  // Catatan: SQLite tidak mendukung `mode: "insensitive"`. Untuk teks ASCII,
+  // LIKE di SQLite sudah case-insensitive secara default, jadi cukup `contains`.
   const where = {
     status: "ACTIVE",
-    itemName: { contains: query, mode: "insensitive" },
+    itemName: { contains: query },
   };
   if (type) where.type = type;
 

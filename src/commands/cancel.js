@@ -17,7 +17,7 @@ export default {
     ),
 
   async execute(interaction) {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const listingId = interaction.options.getInteger("id", true);
 
     let result;

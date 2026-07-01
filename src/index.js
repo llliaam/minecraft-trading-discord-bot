@@ -4,6 +4,7 @@ import { readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { config } from "./lib/config.js";
+import { startApiServer } from "./api/server.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -71,6 +72,10 @@ async function main() {
   await loadCommands();
   await loadEvents();
   await client.login(config.token);
+
+  // Nyalakan REST server untuk mod (Fase C). Aman bila API_SECRET kosong:
+  // fungsi ini akan melewati start & memberi peringatan.
+  startApiServer();
 }
 
 main().catch((err) => {

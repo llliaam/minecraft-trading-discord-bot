@@ -1,0 +1,77 @@
+plugins {
+    id 'fabric-loom' version '1.10-SNAPSHOT'
+    id 'maven-publish'
+}
+
+// Nama file .jar hasil build.
+version = project.mod_version
+group = project.maven_group
+
+base {
+    archivesName = project.archives_base_name
+}
+
+repositories {
+    // Nucleoid — rumah sgui (Patbox) dan library server-side lainnya.
+    maven {
+        name = "Nucleoid"
+        url = "https://maven.nucleoid.xyz/"
+    }
+    // Repo publik lain kalau dibutuhkan nanti.
+    mavenCentral()
+}
+
+dependencies {
+    // Inti: Minecraft + mappings (yarn) + Fabric Loader.
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
+    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+
+    // Fabric API — perlu untuk command registration, events, dll.
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+
+    // sgui — GUI chest server-side. `include` = di-bundle ke dalam jar mod
+    // kita, jadi pemain/server tak perlu pasang sgui terpisah.
+    modImplementation "eu.pb4:sgui:${project.sgui_version}"
+    include "eu.pb4:sgui:${project.sgui_version}"
+}
+
+processResources {
+    // Ganti placeholder di fabric.mod.json dengan versi asli dari gradle.properties.
+    inputs.property "version", project.version
+    inputs.property "minecraft_version", project.minecraft_version
+    inputs.property "loader_version", project.loader_version
+
+    filesMatching("fabric.mod.json") {
+        expand(
+            "version": project.version,
+            "minecraft_version": project.minecraft_version,
+            "loader_version": project.loader_version
+        )
+    }
+}
+
+// Kompilasi dengan Java 21 (syarat Minecraft 1.21.x).
+tasks.withType(JavaCompile).configureEach {
+    it.options.release = 21
+}
+
+java {
+    // Ikutkan source jar saat publish/remap.
+    withSourcesJar()
+
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
+
+    // Paksa toolchain Java 21 walau JAVA_HOME sistem menunjuk versi lain
+    // (di komputer ini default sistem Java 25 — lihat memory Fase C).
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+jar {
+    from("LICENSE") {
+        rename { "${it}_${project.archivesBaseName}" }
+    }
+}

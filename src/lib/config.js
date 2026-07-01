@@ -15,4 +15,9 @@ export const config = {
   clientId: required("CLIENT_ID"),
   guildId: required("GUILD_ID"),
   marketplaceChannelId: required("MARKETPLACE_CHANNEL_ID"),
+
+  // IPC Bot <-> Mod (Fase C). Opsional: REST server hanya menyala bila
+  // apiSecret terisi. Port default 8765 bila tak di-set.
+  apiPort: Number(process.env.API_PORT) || 8765,
+  apiSecret: process.env.API_SECRET || null,
 };

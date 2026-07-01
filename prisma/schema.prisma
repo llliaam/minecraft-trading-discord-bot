@@ -6,7 +6,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -39,6 +39,28 @@ enum TransactionStatus {
 }
 
 // ===== Models =====
+
+// Peta akun Discord <-> Minecraft. Satu pemain = satu baris (relasi 1:1).
+// Dibuat saat pemain menukar kode linking (lihat LinkCode).
+model PlayerLink {
+  id            Int      @id @default(autoincrement())
+  discordId     String   @unique // Discord user ID
+  minecraftUuid String   @unique // UUID Minecraft (sumber kebenaran identitas in-game)
+  minecraftName String // cache nama, untuk tampilan (bisa berubah, bukan kunci)
+  linkedAt      DateTime @default(now())
+}
+
+// Kode sementara untuk proses linking. Dibuat oleh /link di Discord,
+// ditukar dari in-game. Sekali pakai & kedaluwarsa (lihat linkService).
+model LinkCode {
+  id        Int      @id @default(autoincrement())
+  code      String   @unique // kode pendek alfanumerik, mis. "A3F9K2"
+  discordId String   @unique // satu user hanya punya satu kode aktif
+  expiresAt DateTime // setelah ini, kode tidak berlaku
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+}
 
 model Listing {
   id          Int           @id @default(autoincrement())

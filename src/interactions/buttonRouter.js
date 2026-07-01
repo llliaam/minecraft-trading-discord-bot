@@ -108,7 +108,7 @@ async function handleBrowsePage(interaction) {
 
 // ===== Buy Now: tahap 1 — tampilkan konfirmasi (ephemeral) =====
 async function handleBuyNowPrompt(interaction, listingId) {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const listing = await getListing(listingId);
 
   if (!listing || listing.status !== "ACTIVE") {
@@ -186,7 +186,7 @@ async function handleOfferAccept(interaction, offerId) {
     result = await acceptOffer({ offerId, actorId: interaction.user.id });
   } catch (err) {
     if (err instanceof BusinessError) {
-      await interaction.followUp({ content: `⚠️ ${err.message}`, ephemeral: true });
+      await interaction.followUp({ content: `⚠️ ${err.message}`, flags: MessageFlags.Ephemeral });
       return;
     }
     throw err;
@@ -226,7 +226,7 @@ async function handleOfferReject(interaction, offerId) {
     result = await rejectOffer({ offerId, actorId: interaction.user.id });
   } catch (err) {
     if (err instanceof BusinessError) {
-      await interaction.followUp({ content: `⚠️ ${err.message}`, ephemeral: true });
+      await interaction.followUp({ content: `⚠️ ${err.message}`, flags: MessageFlags.Ephemeral });
       return;
     }
     throw err;
@@ -252,7 +252,7 @@ async function handleOfferReject(interaction, offerId) {
 
 // ===== Mark Completed =====
 async function handleMarkCompleted(interaction, transactionId) {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   let result;
   try {
     result = await completeTransaction({ transactionId, actorId: interaction.user.id });

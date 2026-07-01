@@ -27,7 +27,7 @@ export default {
     ),
 
   async execute(interaction) {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const query = interaction.options.getString("item", true).trim();
     const type = interaction.options.getString("type") ?? undefined;
 

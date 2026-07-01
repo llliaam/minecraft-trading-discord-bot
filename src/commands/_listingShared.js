@@ -52,7 +52,7 @@ export async function executeListing(interaction, type) {
   }
 
   // Defer segera — DB + fetch channel bisa melebihi batas 3 detik Discord.
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const itemName = interaction.options.getString("item", true).trim();
   const price = interaction.options.getString("price", true).trim();
