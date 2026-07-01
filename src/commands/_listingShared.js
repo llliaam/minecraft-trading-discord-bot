@@ -3,9 +3,11 @@ import { SlashCommandBuilder, MessageFlags } from "discord.js";
 import { config } from "../lib/config.js";
 import { buildListingEmbed, buildListingButtons } from "../lib/embeds.js";
 import { createListing, attachMessageId } from "../services/listingService.js";
+import { findItems, isValidKey, prettify } from "../lib/itemCatalog.js";
 
 /**
  * Bangun SlashCommandBuilder untuk listing (dipakai /sell & /buy).
+ * `item` & `price_item` pakai autocomplete → value = itemKey kanonik.
  * @param {object} opts
  * @param {string} opts.name         "sell" | "buy"
  * @param {string} opts.description
@@ -15,25 +17,51 @@ export function buildListingCommandData({ name, description }) {
     .setName(name)
     .setDescription(description)
     .addStringOption((o) =>
-      o.setName("item").setDescription("Nama item").setRequired(true).setMaxLength(100),
+      o
+        .setName("item")
+        .setDescription("Item (ketik untuk mencari)")
+        .setRequired(true)
+        .setAutocomplete(true),
     )
     .addStringOption((o) =>
       o
-        .setName("price")
-        .setDescription('Harga, teks bebas (mis. "64 diamond")')
+        .setName("price_item")
+        .setDescription("Item pembayaran (ketik untuk mencari)")
         .setRequired(true)
-        .setMaxLength(100),
+        .setAutocomplete(true),
+    )
+    .addIntegerOption((o) =>
+      o
+        .setName("price_qty")
+        .setDescription("Jumlah item pembayaran")
+        .setRequired(true)
+        .setMinValue(1)
+        .setMaxValue(100000),
     )
     .addIntegerOption((o) =>
       o
         .setName("qty")
-        .setDescription("Jumlah item (default 1)")
+        .setDescription("Jumlah item yang dijual/dicari (default 1)")
         .setMinValue(1)
         .setMaxValue(100000),
     )
     .addStringOption((o) =>
       o.setName("desc").setDescription("Deskripsi tambahan (opsional)").setMaxLength(500),
     );
+}
+
+/**
+ * Handler autocomplete untuk /sell & /buy. Opsi `item` dan `price_item`
+ * dua-duanya mencari di katalog item. Dipakai oleh sell.js & buy.js.
+ * @param {import("discord.js").AutocompleteInteraction} interaction
+ */
+export async function autocompleteListing(interaction) {
+  const focused = interaction.options.getFocused(true);
+  if (focused.name === "item" || focused.name === "price_item") {
+    await interaction.respond(findItems(focused.value));
+    return;
+  }
+  await interaction.respond([]);
 }
 
 /**
@@ -54,10 +82,28 @@ export async function executeListing(interaction, type) {
   // Defer segera — DB + fetch channel bisa melebihi batas 3 detik Discord.
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-  const itemName = interaction.options.getString("item", true).trim();
-  const price = interaction.options.getString("price", true).trim();
+  const itemKey = interaction.options.getString("item", true).trim();
+  const priceItemKey = interaction.options.getString("price_item", true).trim();
+  const priceQuantity = interaction.options.getInteger("price_qty", true);
   const quantity = interaction.options.getInteger("qty") ?? 1;
   const description = interaction.options.getString("desc")?.trim() || null;
+
+  // Validasi: kedua item harus key kanonik dari katalog. Autocomplete sudah
+  // mengarahkan ke sini, tapi pemain bisa saja mengetik bebas lalu Enter.
+  if (!isValidKey(itemKey)) {
+    await interaction.editReply({
+      content:
+        `⚠️ Item **${itemKey}** tidak dikenal. Pilih dari daftar saran yang muncul saat mengetik.`,
+    });
+    return;
+  }
+  if (!isValidKey(priceItemKey)) {
+    await interaction.editReply({
+      content:
+        `⚠️ Item pembayaran **${priceItemKey}** tidak dikenal. Pilih dari daftar saran yang muncul saat mengetik.`,
+    });
+    return;
+  }
 
   // Ambil channel marketplace lebih dulu — kalau gagal, jangan terlanjur simpan listing.
   const channel = await interaction.client.channels
@@ -72,13 +118,15 @@ export async function executeListing(interaction, type) {
     return;
   }
 
-  // 1. Simpan listing ke DB.
+  // 1. Simpan listing ke DB. itemLabel = label rapi dari katalog (utk tampilan).
   const listing = await createListing({
     creatorId: interaction.user.id,
     type,
-    itemName,
+    itemKey,
+    itemLabel: prettify(itemKey),
     quantity,
-    price,
+    priceItemKey,
+    priceQuantity,
     description,
   });
 

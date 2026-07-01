@@ -55,7 +55,8 @@ export async function buyNow({ listingId, actorId }) {
         offerId: null, // Buy Now tidak melalui offer
         sellerId,
         buyerId,
-        finalPrice: listing.price,
+        finalItemKey: listing.priceItemKey,
+        finalQuantity: listing.priceQuantity,
         status: "AGREED",
       },
     });

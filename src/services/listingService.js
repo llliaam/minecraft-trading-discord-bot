@@ -6,11 +6,13 @@ import { BusinessError } from "./transactionService.js";
 /**
  * Buat listing baru (status default ACTIVE).
  * @param {object} input
- * @param {string} input.creatorId  Discord user ID pembuat.
+ * @param {string} input.creatorId      Discord user ID pembuat.
  * @param {"SELL"|"BUY"} input.type
- * @param {string} input.itemName
+ * @param {string} input.itemKey        id kanonik MC, mis. "minecraft:elytra".
+ * @param {string} input.itemLabel      teks tampilan, mis. "Elytra".
  * @param {number} input.quantity
- * @param {string} input.price       teks bebas, mis. "64 diamond".
+ * @param {string} input.priceItemKey   id item pembayaran, mis. "minecraft:diamond".
+ * @param {number} input.priceQuantity  jumlah item pembayaran.
  * @param {string|null} [input.description]
  * @returns {Promise<object>} record Listing.
  */
@@ -19,9 +21,11 @@ export function createListing(input) {
     data: {
       creatorId: input.creatorId,
       type: input.type,
-      itemName: input.itemName,
+      itemKey: input.itemKey,
+      itemLabel: input.itemLabel,
       quantity: input.quantity,
-      price: input.price,
+      priceItemKey: input.priceItemKey,
+      priceQuantity: input.priceQuantity,
       description: input.description ?? null,
     },
   });
@@ -83,9 +87,10 @@ export async function browseListings({ type, page = 1 } = {}) {
 export async function searchListings({ query, type, limit = 10 }) {
   // Catatan: SQLite tidak mendukung `mode: "insensitive"`. Untuk teks ASCII,
   // LIKE di SQLite sudah case-insensitive secara default, jadi cukup `contains`.
+  // Cari di itemLabel (teks tampilan) — lebih ramah pengguna daripada itemKey.
   const where = {
     status: "ACTIVE",
-    itemName: { contains: query },
+    itemLabel: { contains: query },
   };
   if (type) where.type = type;
 

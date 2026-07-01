@@ -6,6 +6,7 @@
 // sebagai BusinessError dan ditangkap oleh server jadi HTTP 400.
 import { browseListings } from "../services/listingService.js";
 import { redeemLinkCode } from "../services/linkService.js";
+import { formatPrice } from "../lib/itemCatalog.js";
 
 /** GET /health — cek server hidup. Tidak butuh logika apa pun. */
 export function health() {
@@ -29,9 +30,13 @@ export async function listings({ query }) {
       items: result.items.map((l) => ({
         id: l.id,
         type: l.type,
-        itemName: l.itemName,
+        itemKey: l.itemKey,
+        itemLabel: l.itemLabel,
         quantity: l.quantity,
-        price: l.price,
+        priceItemKey: l.priceItemKey,
+        priceQuantity: l.priceQuantity,
+        // priceText: harga siap-tampil, biar mod tak perlu duplikasi katalog.
+        priceText: formatPrice(l.priceQuantity, l.priceItemKey),
         description: l.description ?? null,
         creatorId: l.creatorId,
       })),

@@ -19,6 +19,7 @@ enum ListingType {
 
 enum ListingStatus {
   ACTIVE    // tampil di marketplace, menerima offer/buy
+  RESERVED  // terkunci untuk 1 pembeli setelah Accept offer (24 jam) — Fase E
   PENDING   // sudah ada deal, menunggu trade in-game selesai
   COMPLETED // trade selesai
   CANCELLED // dibatalkan creator
@@ -63,34 +64,44 @@ model LinkCode {
 }
 
 model Listing {
-  id          Int           @id @default(autoincrement())
-  creatorId   String // Discord user ID
-  type        ListingType
-  itemName    String
-  quantity    Int           @default(1)
-  price       String // teks bebas, mis. "64 diamond"
-  description String?
-  status      ListingStatus @default(ACTIVE)
-  messageId   String? // ID embed di channel marketplace (utk update tampilan)
-  createdAt   DateTime      @default(now())
-  expiresAt   DateTime? // opsional (Fase 2)
+  id            Int           @id @default(autoincrement())
+  creatorId     String // Discord user ID
+  type          ListingType
+  // ----- Barang yang dijual/dicari (terstruktur) -----
+  itemKey       String // id kanonik MC, mis. "minecraft:elytra"
+  itemLabel     String // teks tampilan, mis. "Elytra [Unbreaking III]"
+  quantity      Int           @default(1)
+  // ----- Harga = item pembayaran + jumlah -----
+  priceItemKey  String // id item pembayaran, mis. "minecraft:diamond"
+  priceQuantity Int // jumlah item pembayaran
+  description   String?
+  status        ListingStatus @default(ACTIVE)
+  messageId     String? // ID embed di channel marketplace (utk update tampilan)
+  // ----- Field escrow & reservasi (dipakai mulai Fase E; nullable dulu) -----
+  escrowRef     String? // ID slot escrow di mod (SELL yg barangnya sudah disetor)
+  reservedFor   String? // Discord user ID pembeli, saat RESERVED
+  reservedUntil DateTime? // batas waktu reservasi (+24 jam)
+  createdAt     DateTime      @default(now())
+  expiresAt     DateTime? // opsional (Fase 2)
 
   offers       Offer[]
   transactions Transaction[]
 
   @@index([status])
   @@index([creatorId])
-  @@index([itemName])
+  @@index([itemKey])
 }
 
 model Offer {
-  id           Int         @id @default(autoincrement())
-  listingId    Int
-  buyerId      String // Discord user ID pembuat offer
-  offeredPrice String // teks bebas
-  message      String?
-  status       OfferStatus @default(PENDING)
-  createdAt    DateTime    @default(now())
+  id            Int         @id @default(autoincrement())
+  listingId     Int
+  buyerId       String // Discord user ID pembuat offer
+  // ----- Usulan harga = item pembayaran + jumlah -----
+  priceItemKey  String // usulan item bayar, mis. "minecraft:diamond"
+  priceQuantity Int // usulan jumlah
+  message       String?
+  status        OfferStatus @default(PENDING)
+  createdAt     DateTime    @default(now())
 
   listing      Listing       @relation(fields: [listingId], references: [id], onDelete: Cascade)
   transactions Transaction[]
@@ -101,15 +112,17 @@ model Offer {
 }
 
 model Transaction {
-  id          Int               @id @default(autoincrement())
-  listingId   Int
-  offerId     Int? // NULL kalau Buy Now (tanpa offer)
-  sellerId    String // pihak yang melepas barang
-  buyerId     String // pihak yang menerima barang
-  finalPrice  String
-  status      TransactionStatus @default(AGREED)
-  createdAt   DateTime          @default(now())
-  completedAt DateTime?
+  id            Int               @id @default(autoincrement())
+  listingId     Int
+  offerId       Int? // NULL kalau Buy Now (tanpa offer)
+  sellerId      String // pihak yang melepas barang
+  buyerId       String // pihak yang menerima barang
+  // ----- Pembayaran final = item + jumlah -----
+  finalItemKey  String // id item pembayaran final
+  finalQuantity Int // jumlah pembayaran final
+  status        TransactionStatus @default(AGREED)
+  createdAt     DateTime          @default(now())
+  completedAt   DateTime?
 
   listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
   offer   Offer?  @relation(fields: [offerId], references: [id], onDelete: SetNull)

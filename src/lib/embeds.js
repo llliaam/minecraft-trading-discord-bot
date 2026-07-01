@@ -6,10 +6,12 @@ import {
   EmbedBuilder,
 } from "discord.js";
 import { Action, buildId, encodeBrowse } from "./ids.js";
+import { formatPrice } from "./itemCatalog.js";
 
 // Warna embed per status (hex → angka).
 const STATUS_COLOR = {
   ACTIVE: 0x57f287, // hijau
+  RESERVED: 0xeb459e, // pink — terkunci utk 1 pembeli (Fase E)
   PENDING: 0xfee75c, // kuning — ada deal, menunggu trade
   COMPLETED: 0x5865f2, // biru — selesai
   CANCELLED: 0xed4245, // merah
@@ -19,6 +21,7 @@ const STATUS_COLOR = {
 // Label & emoji status untuk judul embed.
 const STATUS_BADGE = {
   ACTIVE: "🟢 Tersedia",
+  RESERVED: "🔒 Direservasi",
   PENDING: "🟡 Menunggu Trade",
   COMPLETED: "✅ Selesai",
   CANCELLED: "❌ Dibatalkan",
@@ -35,10 +38,14 @@ export function buildListingEmbed(listing) {
 
   const embed = new EmbedBuilder()
     .setColor(STATUS_COLOR[listing.status] ?? 0x2b2d31)
-    .setTitle(`${typeLabel} — ${listing.itemName}`)
+    .setTitle(`${typeLabel} — ${listing.itemLabel}`)
     .addFields(
       { name: "Jumlah", value: String(listing.quantity), inline: true },
-      { name: "Harga", value: listing.price, inline: true },
+      {
+        name: "Harga",
+        value: formatPrice(listing.priceQuantity, listing.priceItemKey),
+        inline: true,
+      },
       { name: "Status", value: STATUS_BADGE[listing.status] ?? listing.status, inline: true },
       { name: "Oleh", value: `<@${listing.creatorId}>`, inline: true },
     )
@@ -103,9 +110,10 @@ export function buildListingButtons(listing, { transactionId } = {}) {
 function formatListingLine(listing) {
   const typeIcon = listing.type === "SELL" ? "🛒" : "🔎";
   const desc = listing.description ? ` — ${listing.description}` : "";
+  const price = formatPrice(listing.priceQuantity, listing.priceItemKey);
   return (
-    `${typeIcon} **#${listing.id}** · **${listing.itemName}** ×${listing.quantity}\n` +
-    `   💰 ${listing.price} · oleh <@${listing.creatorId}>${desc}`
+    `${typeIcon} **#${listing.id}** · **${listing.itemLabel}** ×${listing.quantity}\n` +
+    `   💰 ${price} · oleh <@${listing.creatorId}>${desc}`
   );
 }
 
@@ -167,9 +175,10 @@ export function buildBrowseButtons(page, type) {
 function formatMyListingLine(listing) {
   const typeIcon = listing.type === "SELL" ? "🛒" : "🔎";
   const badge = STATUS_BADGE[listing.status] ?? listing.status;
+  const price = formatPrice(listing.priceQuantity, listing.priceItemKey);
   return (
-    `${typeIcon} **#${listing.id}** · **${listing.itemName}** ×${listing.quantity} — ${badge}\n` +
-    `   💰 ${listing.price}`
+    `${typeIcon} **#${listing.id}** · **${listing.itemLabel}** ×${listing.quantity} — ${badge}\n` +
+    `   💰 ${price}`
   );
 }
 
@@ -204,12 +213,14 @@ export function buildMyListingsEmbed(items) {
  * @param {object} listing  record Listing terkait.
  */
 export function buildOfferEmbed(offer, listing) {
+  const listingPrice = formatPrice(listing.priceQuantity, listing.priceItemKey);
+  const offerPrice = formatPrice(offer.priceQuantity, offer.priceItemKey);
   const embed = new EmbedBuilder()
     .setColor(0xeb459e) // pink — butuh perhatian
-    .setTitle(`💬 Offer baru untuk ${listing.itemName}`)
+    .setTitle(`💬 Offer baru untuk ${listing.itemLabel}`)
     .addFields(
-      { name: "Listing", value: `#${listing.id} (${listing.price})`, inline: true },
-      { name: "Tawaran", value: offer.offeredPrice, inline: true },
+      { name: "Listing", value: `#${listing.id} (${listingPrice})`, inline: true },
+      { name: "Tawaran", value: offerPrice, inline: true },
       { name: "Dari", value: `<@${offer.buyerId}>`, inline: true },
     )
     .setFooter({ text: `Offer #${offer.id}` })

@@ -5,8 +5,9 @@
 export const Action = {
   BUY_NOW: "buynow", // tombol Buy Now di embed listing → listingId (munculkan konfirmasi)
   BUY_CONFIRM: "buyok", // tombol konfirmasi beli (ephemeral) → listingId
-  MAKE_OFFER: "offer", // tombol Make Offer di embed listing → listingId
-  OFFER_MODAL: "offermodal", // modal submit pembuatan offer → listingId
+  MAKE_OFFER: "offer", // tombol Make Offer di embed listing → arahkan ke /offer
+  // OFFER_MODAL dipensiunkan: pembuatan offer kini via slash /offer (modal Discord
+  // tak mendukung autocomplete item). Dibiarkan sbg catatan sejarah, tak dipakai.
   OFFER_ACCEPT: "oaccept", // tombol Accept offer → offerId
   OFFER_REJECT: "oreject", // tombol Reject offer → offerId
   TX_COMPLETE: "txdone", // tombol Mark Completed → transactionId

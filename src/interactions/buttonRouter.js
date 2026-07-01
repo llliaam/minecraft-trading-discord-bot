@@ -4,9 +4,6 @@ import {
   ButtonBuilder,
   ButtonStyle,
   MessageFlags,
-  ModalBuilder,
-  TextInputBuilder,
-  TextInputStyle,
 } from "discord.js";
 import { Action, buildId, parseId, decodeBrowse } from "../lib/ids.js";
 import { browseListings, getListing } from "../services/listingService.js";
@@ -18,6 +15,7 @@ import {
 import { acceptOffer, rejectOffer } from "../services/offerService.js";
 import { buildListEmbed, buildBrowseButtons } from "../lib/embeds.js";
 import { getMarketplaceChannel, updateListingMessage } from "../lib/marketplace.js";
+import { formatPrice } from "../lib/itemCatalog.js";
 
 /** Entry point: arahkan tombol ke handler sesuai prefix action. */
 export async function handleButton(interaction) {
@@ -48,7 +46,10 @@ export async function handleButton(interaction) {
   }
 }
 
-// ===== Make Offer: tampilkan modal input =====
+// ===== Make Offer: arahkan ke slash command /offer =====
+// Kenapa tak modal? Modal Discord TIDAK mendukung autocomplete, sehingga item
+// pembayaran jadi teks bebas (melenceng dari katalog kanonik). /offer punya
+// autocomplete → item dijamin valid. Tombol ini jadi pengarah yang ramah.
 async function handleMakeOffer(interaction, listingId) {
   const listing = await getListing(listingId);
 
@@ -67,31 +68,13 @@ async function handleMakeOffer(interaction, listingId) {
     return;
   }
 
-  const modal = new ModalBuilder()
-    .setCustomId(buildId(Action.OFFER_MODAL, listing.id))
-    .setTitle(`Offer untuk ${listing.itemName}`.slice(0, 45));
-
-  const priceInput = new TextInputBuilder()
-    .setCustomId("offeredPrice")
-    .setLabel("Tawaranmu")
-    .setPlaceholder('mis. "50 diamond" atau "1 stack emerald"')
-    .setStyle(TextInputStyle.Short)
-    .setMaxLength(100)
-    .setRequired(true);
-
-  const messageInput = new TextInputBuilder()
-    .setCustomId("message")
-    .setLabel("Pesan (opsional)")
-    .setStyle(TextInputStyle.Paragraph)
-    .setMaxLength(500)
-    .setRequired(false);
-
-  modal.addComponents(
-    new ActionRowBuilder().addComponents(priceInput),
-    new ActionRowBuilder().addComponents(messageInput),
-  );
-
-  await interaction.showModal(modal);
+  await interaction.reply({
+    content:
+      `💬 Untuk menawar **${listing.itemLabel}** (listing #${listing.id}), pakai command:\n` +
+      `\`/offer id:${listing.id} price_item:<item> price_qty:<jumlah>\`\n` +
+      `Saat mengetik \`price_item\`, pilih item dari daftar saran yang muncul.`,
+    flags: MessageFlags.Ephemeral,
+  });
 }
 
 // ===== Pagination /browse =====
@@ -132,8 +115,8 @@ async function handleBuyNowPrompt(interaction, listingId) {
 
   await interaction.editReply({
     content:
-      `Kamu akan ${verb} **${listing.itemName}** ×${listing.quantity} ` +
-      `seharga **${listing.price}**.\nLanjutkan?`,
+      `Kamu akan ${verb} **${listing.itemLabel}** ×${listing.quantity} ` +
+      `seharga **${formatPrice(listing.priceQuantity, listing.priceItemKey)}**.\nLanjutkan?`,
     components: [confirmRow],
   });
 }
@@ -166,7 +149,8 @@ async function handleBuyConfirm(interaction, listingId) {
       .send({
         content:
           `🤝 **Deal!** <@${transaction.sellerId}> & <@${transaction.buyerId}> ` +
-          `untuk **${listing.itemName}** ×${listing.quantity} (${listing.price}).\n` +
+          `untuk **${listing.itemLabel}** ×${listing.quantity} ` +
+          `(${formatPrice(listing.priceQuantity, listing.priceItemKey)}).\n` +
           `Silakan koordinasi trade in-game. Klik **Tandai Selesai** di listing #${listing.id} bila sudah beres.`,
       })
       .catch(() => {});
@@ -211,7 +195,8 @@ async function handleOfferAccept(interaction, offerId) {
       .send({
         content:
           `🤝 **Deal!** <@${transaction.sellerId}> & <@${transaction.buyerId}> ` +
-          `untuk **${listing.itemName}** ×${listing.quantity} (${transaction.finalPrice}).\n` +
+          `untuk **${listing.itemLabel}** ×${listing.quantity} ` +
+          `(${formatPrice(transaction.finalQuantity, transaction.finalItemKey)}).\n` +
           `Silakan koordinasi trade in-game. Klik **Tandai Selesai** di listing #${listing.id} bila sudah beres.`,
       })
       .catch(() => {});
@@ -280,7 +265,7 @@ async function handleMarkCompleted(interaction, transactionId) {
     await channel
       .send({
         content:
-          `📦 Transaksi **${listing.itemName}** ×${listing.quantity} selesai ` +
+          `📦 Transaksi **${listing.itemLabel}** ×${listing.quantity} selesai ` +
           `antara <@${transaction.sellerId}> & <@${transaction.buyerId}>.`,
       })
       .catch(() => {});

@@ -6,13 +6,14 @@ import { BusinessError } from "./transactionService.js";
  * Buat offer baru terhadap sebuah listing.
  * @param {object} input
  * @param {number} input.listingId
- * @param {string} input.buyerId        Discord user ID pembuat offer.
- * @param {string} input.offeredPrice   teks bebas.
+ * @param {string} input.buyerId         Discord user ID pembuat offer.
+ * @param {string} input.priceItemKey    usulan item bayar, mis. "minecraft:diamond".
+ * @param {number} input.priceQuantity   usulan jumlah.
  * @param {string|null} [input.message]
  * @returns {Promise<{offer: object, listing: object}>}
  * @throws {BusinessError}
  */
-export async function createOffer({ listingId, buyerId, offeredPrice, message }) {
+export async function createOffer({ listingId, buyerId, priceItemKey, priceQuantity, message }) {
   const listing = await db.listing.findUnique({ where: { id: listingId } });
 
   if (!listing) throw new BusinessError("Listing tidak ditemukan.");
@@ -27,7 +28,8 @@ export async function createOffer({ listingId, buyerId, offeredPrice, message })
     data: {
       listingId,
       buyerId,
-      offeredPrice,
+      priceItemKey,
+      priceQuantity,
       message: message ?? null,
       status: "PENDING",
     },
@@ -109,7 +111,8 @@ export async function acceptOffer({ offerId, actorId }) {
         offerId: offer.id,
         sellerId,
         buyerId,
-        finalPrice: offer.offeredPrice,
+        finalItemKey: offer.priceItemKey,
+        finalQuantity: offer.priceQuantity,
         status: "AGREED",
       },
     });

@@ -17,6 +17,13 @@ export default {
         return;
       }
 
+      if (interaction.isAutocomplete()) {
+        const command = interaction.client.commands.get(interaction.commandName);
+        if (!command?.autocomplete) return;
+        await command.autocomplete(interaction);
+        return;
+      }
+
       if (interaction.isButton()) {
         await handleButton(interaction);
         return;
@@ -28,6 +35,8 @@ export default {
       }
     } catch (err) {
       console.error("❌ Error saat menangani interaksi:", err);
+      // Autocomplete tak bisa dibalas pesan error biasa — cukup log & abaikan.
+      if (interaction.isAutocomplete()) return;
       const reply = {
         content: "⚠️ Terjadi kesalahan saat memproses permintaanmu.",
         flags: MessageFlags.Ephemeral,

@@ -37,7 +37,7 @@ export default {
     await updateListingMessage(interaction.client, listing);
 
     await interaction.editReply({
-      content: `✅ Listing **#${listing.id}** (${listing.itemName}) dibatalkan.`,
+      content: `✅ Listing **#${listing.id}** (${listing.itemLabel}) dibatalkan.`,
     });
   },
 };

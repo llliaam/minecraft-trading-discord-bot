@@ -106,9 +106,9 @@ public class MarketGui {
 
         GuiElementBuilder b = new GuiElementBuilder(Items.PAPER)
             .setName(Text.literal(tag + " ").formatted(tagColor)
-                .append(Text.literal(l.itemName).formatted(Formatting.WHITE)))
+                .append(Text.literal(l.itemLabel).formatted(Formatting.WHITE)))
             .addLoreLine(text("Jumlah: " + l.quantity, Formatting.GRAY))
-            .addLoreLine(text("Harga: " + l.price, Formatting.GOLD));
+            .addLoreLine(text("Harga: " + l.priceText, Formatting.GOLD));
 
         if (l.description != null && !l.description.isBlank()) {
             b.addLoreLine(text("\"" + l.description + "\"", Formatting.DARK_GRAY));

@@ -4,16 +4,20 @@ package com.smp.marketplace.model;
  * Satu listing dari REST bot (<code>GET /listings</code>). Field publik diisi
  * Gson via refleksi — bentuknya mengikuti {@code handlers.js} di sisi bot.
  *
- * <p>Catatan: {@code itemName} & {@code price} masih model LAMA (teks bebas).
- * Saat Fase E, harga jadi item terstruktur (itemKey/priceItemKey) — DTO ini
- * akan menyesuaikan. Untuk browse read-only sekarang, teks sudah cukup.
+ * <p>Harga terstruktur (item + jumlah). Bot mengirim <code>priceText</code>
+ * yang SUDAH diformat (mis. "64× Diamond") agar mod tak perlu menduplikasi
+ * katalog item. Field mentah ({@code priceItemKey}/{@code priceQuantity}) ikut
+ * dikirim untuk kebutuhan Fase E (pencocokan escrow) nanti.
  */
 public class ListingDto {
     public int id;
-    public String type;        // "SELL" | "BUY"
-    public String itemName;
+    public String type;          // "SELL" | "BUY"
+    public String itemKey;       // id kanonik MC, mis. "minecraft:elytra"
+    public String itemLabel;     // teks tampilan, mis. "Elytra"
     public int quantity;
-    public String price;       // teks bebas, mis. "64 diamond"
-    public String description;  // boleh null
+    public String priceItemKey;  // id item pembayaran (mentah)
+    public int priceQuantity;    // jumlah item pembayaran (mentah)
+    public String priceText;     // harga siap-tampil, mis. "64× Diamond"
+    public String description;   // boleh null
     public String creatorId;
 }
