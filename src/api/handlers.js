@@ -4,9 +4,23 @@
 // Konvensi: tiap handler menerima { body } dan mengembalikan { status, data }.
 // `body` sudah di-parse jadi objek (atau {} bila kosong). Error bisnis dilempar
 // sebagai BusinessError dan ditangkap oleh server jadi HTTP 400.
-import { browseListings } from "../services/listingService.js";
-import { redeemLinkCode } from "../services/linkService.js";
-import { formatPrice } from "../lib/itemCatalog.js";
+import { browseListings, createListing, attachMessageId } from "../services/listingService.js";
+import { redeemLinkCode, getLinkByMc } from "../services/linkService.js";
+import {
+  createOffer,
+  getOffersForCreator,
+  acceptOffer,
+  rejectOffer,
+} from "../services/offerService.js";
+import { BusinessError } from "../services/transactionService.js";
+import { formatPrice, isValidKeyFormat, prettify } from "../lib/itemCatalog.js";
+import {
+  buildListingEmbed,
+  buildListingButtons,
+  buildOfferEmbed,
+  buildOfferButtons,
+} from "../lib/embeds.js";
+import { getMarketplaceChannel, updateListingMessage } from "../lib/marketplace.js";
 
 /** GET /health — cek server hidup. Tidak butuh logika apa pun. */
 export function health() {
@@ -74,4 +88,179 @@ export async function linkRedeem({ body }) {
       minecraftName: link.minecraftName,
     },
   };
+}
+
+/** Resolve minecraftUuid → discordId, atau lempar BusinessError bila belum linked. */
+async function resolveDiscordId(minecraftUuid) {
+  const link = await getLinkByMc(minecraftUuid);
+  if (!link) {
+    throw new BusinessError("Akun Minecraft-mu belum tertaut. Jalankan /link di Discord dulu.");
+  }
+  return link.discordId;
+}
+
+/**
+ * POST /listings/buy — buat listing BUY (wishlist) dari in-game.
+ * Body: { minecraftUuid, itemKey, quantity, priceItemKey, priceQuantity, description? }.
+ */
+export async function createBuyListing({ body, client }) {
+  const { minecraftUuid, itemKey, quantity, priceItemKey, priceQuantity, description } = body;
+  const creatorId = await resolveDiscordId(minecraftUuid);
+
+  // Jalur in-game: item berasal dari registry MC asli. Cukup validasi FORMAT
+  // (namespace:path) — semua item boleh, bukan hanya "barang berharga".
+  if (!isValidKeyFormat(itemKey)) {
+    throw new BusinessError(`Item "${itemKey}" tidak valid.`);
+  }
+  if (!isValidKeyFormat(priceItemKey)) {
+    throw new BusinessError(`Item pembayaran "${priceItemKey}" tidak valid.`);
+  }
+
+  const listing = await createListing({
+    creatorId,
+    type: "BUY",
+    itemKey,
+    itemLabel: prettify(itemKey),
+    quantity,
+    priceItemKey,
+    priceQuantity,
+    description: description ?? null,
+  });
+
+  const channel = await getMarketplaceChannel(client);
+  if (channel) {
+    const message = await channel.send({
+      embeds: [buildListingEmbed(listing)],
+      components: buildListingButtons(listing),
+    });
+    await attachMessageId(listing.id, message.id);
+  }
+
+  return {
+    status: 200,
+    data: {
+      id: listing.id,
+      type: listing.type,
+      itemKey: listing.itemKey,
+      itemLabel: listing.itemLabel,
+      quantity: listing.quantity,
+      priceItemKey: listing.priceItemKey,
+      priceQuantity: listing.priceQuantity,
+      priceText: formatPrice(listing.priceQuantity, listing.priceItemKey),
+    },
+  };
+}
+
+/**
+ * POST /offers — buat offer baru dari in-game.
+ * Body: { minecraftUuid, listingId, priceItemKey, priceQuantity, message? }.
+ */
+export async function createOfferFromGame({ body, client }) {
+  const { minecraftUuid, listingId, priceItemKey, priceQuantity, message } = body;
+  const buyerId = await resolveDiscordId(minecraftUuid);
+
+  // Jalur in-game (item dari registry asli) → validasi format saja.
+  if (!isValidKeyFormat(priceItemKey)) {
+    throw new BusinessError(`Item pembayaran "${priceItemKey}" tidak valid.`);
+  }
+
+  const { offer, listing } = await createOffer({
+    listingId,
+    buyerId,
+    priceItemKey,
+    priceQuantity,
+    message: message ?? null,
+  });
+
+  const channel = await getMarketplaceChannel(client);
+  if (channel) {
+    await channel
+      .send({
+        content: `<@${listing.creatorId}> kamu dapat offer baru!`,
+        embeds: [buildOfferEmbed(offer, listing)],
+        components: buildOfferButtons(offer),
+      })
+      .catch(() => {});
+  }
+
+  return {
+    status: 200,
+    data: {
+      id: offer.id,
+      listingId: offer.listingId,
+      priceItemKey: offer.priceItemKey,
+      priceQuantity: offer.priceQuantity,
+      priceText: formatPrice(offer.priceQuantity, offer.priceItemKey),
+      status: offer.status,
+    },
+  };
+}
+
+/**
+ * GET /offers/mine — daftar offer PENDING masuk untuk listing milik pemain.
+ * Query: ?minecraftUuid=.
+ */
+export async function myOffers({ query }) {
+  const creatorId = await resolveDiscordId(query.minecraftUuid);
+  const offers = await getOffersForCreator(creatorId);
+
+  return {
+    status: 200,
+    data: {
+      items: offers.map((o) => ({
+        id: o.id,
+        listingId: o.listingId,
+        priceItemKey: o.priceItemKey,
+        priceQuantity: o.priceQuantity,
+        priceText: formatPrice(o.priceQuantity, o.priceItemKey),
+        message: o.message,
+        buyerId: o.buyerId,
+        listing: {
+          id: o.listing.id,
+          itemKey: o.listing.itemKey,
+          itemLabel: o.listing.itemLabel,
+          quantity: o.listing.quantity,
+          priceText: formatPrice(o.listing.priceQuantity, o.listing.priceItemKey),
+        },
+      })),
+    },
+  };
+}
+
+/**
+ * POST /offers/respond — accept/reject offer dari in-game.
+ * Body: { minecraftUuid, offerId, decision } dengan decision = "accept" | "reject".
+ */
+export async function respondOffer({ body, client }) {
+  const { minecraftUuid, offerId, decision } = body;
+  const actorId = await resolveDiscordId(minecraftUuid);
+
+  if (decision !== "accept" && decision !== "reject") {
+    throw new BusinessError('decision harus "accept" atau "reject".');
+  }
+
+  if (decision === "accept") {
+    const { listing, offer, transaction } = await acceptOffer({ offerId, actorId });
+
+    const channel = await getMarketplaceChannel(client);
+    if (channel) {
+      await updateListingMessage(client, listing, { transactionId: transaction.id });
+      await channel
+        .send(`🤝 Deal! Listing #${listing.id} — offer #${offer.id} diterima.`)
+        .catch(() => {});
+    }
+
+    return { status: 200, data: { ok: true, offerId: offer.id, status: offer.status } };
+  }
+
+  const { offer } = await rejectOffer({ offerId, actorId });
+
+  const channel = await getMarketplaceChannel(client);
+  if (channel) {
+    await channel
+      .send(`<@${offer.buyerId}> maaf, offer #${offer.id}-mu ditolak.`)
+      .catch(() => {});
+  }
+
+  return { status: 200, data: { ok: true, offerId: offer.id, status: offer.status } };
 }

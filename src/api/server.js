@@ -15,6 +15,10 @@ const ROUTES = {
   "GET /health": handlers.health,
   "GET /listings": handlers.listings,
   "POST /link/redeem": handlers.linkRedeem,
+  "POST /listings/buy": handlers.createBuyListing,
+  "POST /offers": handlers.createOfferFromGame,
+  "GET /offers/mine": handlers.myOffers,
+  "POST /offers/respond": handlers.respondOffer,
 };
 
 // Endpoint yang boleh diakses tanpa token (cuma health check).
@@ -58,7 +62,7 @@ function isAuthorized(req) {
   return header === expected;
 }
 
-async function handleRequest(req, res) {
+async function handleRequest(req, res, client) {
   const url = new URL(req.url, "http://localhost");
   const routeKey = `${req.method} ${url.pathname}`;
   const handler = ROUTES[routeKey];
@@ -92,7 +96,7 @@ async function handleRequest(req, res) {
   }
 
   try {
-    const result = await handler({ query, body, req });
+    const result = await handler({ query, body, req, client });
     sendJson(res, result.status, result.data);
   } catch (err) {
     if (err instanceof BusinessError) {
@@ -109,7 +113,7 @@ async function handleRequest(req, res) {
  * Nyalakan REST server. Mengembalikan instance http.Server (atau null bila
  * apiSecret belum di-set — server tak dinyalakan demi keamanan).
  */
-export function startApiServer() {
+export function startApiServer(client) {
   if (!config.apiSecret) {
     console.warn(
       "⚠️  API_SECRET belum di-set — REST server (untuk mod) TIDAK dinyalakan. " +
@@ -119,7 +123,7 @@ export function startApiServer() {
   }
 
   const server = createServer((req, res) => {
-    handleRequest(req, res).catch((err) => {
+    handleRequest(req, res, client).catch((err) => {
       console.error("❌ Error tak tertangani di REST server:", err);
       if (!res.headersSent) sendJson(res, 500, { error: "Kesalahan server internal." });
     });

@@ -1,12 +1,24 @@
-// Katalog item Minecraft 1.21.1 (subset umum untuk SMP).
+// Katalog item Minecraft 1.21.1.
 //
 // Tujuan: memberi `itemKey` KANONIK (mis. "minecraft:diamond") saat pemain
 // membuat listing/offer dari Discord. Key kanonik ini WAJIB agar Fase E (escrow)
 // bisa mencocokkan pembayaran fisik secara otomatis — teks bebas tak bisa.
 //
-// In-game, sumber kebenaran item adalah registry Minecraft asli (mod). Katalog
-// ini hanya untuk sisi Discord: cukup mencakup item yang lazim diperjualbelikan.
-// Menambah item = tambah satu baris di sini.
+// SUMBER DATA (dua lapis):
+//   1. `smpmarket-items.json` (utama) — dump SELURUH item dari registry
+//      Minecraft asli lewat command mod `/smpmarket dumpitems`. Ini membuat
+//      SEMUA item bisa dipakai untuk listing/offer, bukan cuma "barang berharga".
+//   2. `RAW` di bawah (fallback) — subset ~130 item yang di-hardcode. Dipakai
+//      hanya bila file dump belum ada (mis. sebelum admin menjalankan dumpitems),
+//      supaya bot tetap berjalan.
+//
+// Untuk memperbarui daftar item (mis. setelah update versi MC): jalankan
+// `/smpmarket dumpitems` di server, lalu salin `smpmarket-items.json` yang
+// dihasilkan ke folder ini (`src/lib/`) — timpa yang lama — dan restart bot.
+
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 
 /**
  * Peta itemKey -> label tampilan. Key TANPA namespace ditulis ringkas;
@@ -156,16 +168,45 @@ const RAW = {
   torch: "Torch",
 };
 
-// Bangun daftar final: { key: "minecraft:xxx", label: "Xxx", search: "xxx label lower" }
-const CATALOG = Object.entries(RAW).map(([short, label]) => {
-  const key = `minecraft:${short}`;
-  return {
-    key,
-    label,
-    // string pencarian gabungan (nama pendek + label), lowercase.
-    search: `${short} ${label}`.toLowerCase(),
-  };
-});
+/**
+ * Muat peta { "minecraft:xxx": "Label" } dari file dump registry, bila ada.
+ * Mengembalikan null bila file tak ada / tak valid → pemanggil pakai fallback RAW.
+ */
+function loadDumpedItems() {
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    // Nama file = hasil `/smpmarket dumpitems` di mod (tinggal salin apa adanya).
+    const raw = readFileSync(join(here, "smpmarket-items.json"), "utf8");
+    const obj = JSON.parse(raw);
+    if (obj && typeof obj === "object" && Object.keys(obj).length > 0) {
+      return obj;
+    }
+  } catch {
+    // File belum ada (dump belum dijalankan) atau tak bisa dibaca → fallback.
+  }
+  return null;
+}
+
+// Bangun daftar final: { key: "minecraft:xxx", label: "Xxx", search: "xxx label lower" }.
+// Utamakan dump registry (key sudah lengkap dengan namespace); kalau tak ada,
+// pakai RAW (key ringkas tanpa namespace → tambahkan "minecraft:").
+const dumped = loadDumpedItems();
+const CATALOG = dumped
+  ? Object.entries(dumped).map(([key, label]) => ({
+      key,
+      // Bagian setelah ':' untuk memperkaya string pencarian (mis. "diamond_sword").
+      search: `${key.replace(/^.*:/, "")} ${label}`.toLowerCase(),
+      label,
+    }))
+  : Object.entries(RAW).map(([short, label]) => {
+      const key = `minecraft:${short}`;
+      return {
+        key,
+        label,
+        // string pencarian gabungan (nama pendek + label), lowercase.
+        search: `${short} ${label}`.toLowerCase(),
+      };
+    });
 
 // Set untuk validasi O(1).
 const VALID_KEYS = new Set(CATALOG.map((e) => e.key));
@@ -192,6 +233,24 @@ export function findItems(query) {
 /** True bila key ada di katalog (kanonik & dikenal). */
 export function isValidKey(key) {
   return VALID_KEYS.has(key);
+}
+
+// Format identifier Minecraft: "namespace:path". Namespace & path memakai
+// [a-z0-9_.-]; path boleh punya '/' (mis. resource). Referensi: aturan
+// Identifier vanilla. Dipakai untuk jalur IN-GAME, di mana item berasal dari
+// registry asli — kita hanya perlu memastikan bentuknya waras, bukan menuntut
+// item ada di katalog Discord (yang bisa saja tertinggal versi).
+const KEY_FORMAT = /^[a-z0-9_.-]+:[a-z0-9_.\-/]+$/;
+
+/**
+ * True bila `key` berbentuk identifier MC valid ("namespace:path").
+ * Longgar sengaja: jalur in-game mengirim key kanonik dari registry, jadi cukup
+ * validasi format untuk menolak input sampah tanpa mengunci ke katalog.
+ * @param {string} key
+ * @returns {boolean}
+ */
+export function isValidKeyFormat(key) {
+  return typeof key === "string" && KEY_FORMAT.test(key);
 }
 
 /**

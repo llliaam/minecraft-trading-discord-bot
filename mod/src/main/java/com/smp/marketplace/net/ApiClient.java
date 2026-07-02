@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import com.smp.marketplace.SmpMarketMod;
 import com.smp.marketplace.config.ModConfig;
 import com.smp.marketplace.model.ListingPage;
+import com.smp.marketplace.model.OfferListResult;
 
 import java.net.URI;
 import java.net.URLEncoder;
@@ -93,6 +94,102 @@ public class ApiClient {
         }
 
         throw new ApiException(extractError(res, "Gagal mengambil daftar listing."));
+    }
+
+    /**
+     * POST /listings/buy — buat listing BUY (wishlist) dari in-game.
+     *
+     * @throws ApiException bila item tak dikenali, belum linked, atau bot mati.
+     */
+    public void createBuyListing(
+            String itemKey,
+            int quantity,
+            String priceItemKey,
+            int priceQuantity,
+            String description,
+            String minecraftUuid) throws ApiException {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("minecraftUuid", minecraftUuid);
+        payload.addProperty("itemKey", itemKey);
+        payload.addProperty("quantity", quantity);
+        payload.addProperty("priceItemKey", priceItemKey);
+        payload.addProperty("priceQuantity", priceQuantity);
+        if (description != null) {
+            payload.addProperty("description", description);
+        }
+
+        HttpResponse<String> res = send("POST", "/listings/buy", gson.toJson(payload));
+        if (res.statusCode() == 200) return;
+        throw new ApiException(extractError(res, "Gagal membuat listing."));
+    }
+
+    /**
+     * POST /offers — buat offer/nego harga terhadap listing dari in-game.
+     *
+     * @throws ApiException bila listing tak ditemukan, item tak dikenali, atau bot mati.
+     */
+    public void createOffer(
+            int listingId,
+            String priceItemKey,
+            int priceQuantity,
+            String message,
+            String minecraftUuid) throws ApiException {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("minecraftUuid", minecraftUuid);
+        payload.addProperty("listingId", listingId);
+        payload.addProperty("priceItemKey", priceItemKey);
+        payload.addProperty("priceQuantity", priceQuantity);
+        if (message != null) {
+            payload.addProperty("message", message);
+        }
+
+        HttpResponse<String> res = send("POST", "/offers", gson.toJson(payload));
+        if (res.statusCode() == 200) return;
+        throw new ApiException(extractError(res, "Gagal membuat offer."));
+    }
+
+    /**
+     * GET /offers/mine — daftar offer PENDING masuk untuk listing milik pemain.
+     *
+     * @throws ApiException bila belum linked atau bot mati.
+     */
+    public OfferListResult fetchMyOffers(String minecraftUuid) throws ApiException {
+        String path = "/offers/mine?minecraftUuid="
+            + URLEncoder.encode(minecraftUuid, StandardCharsets.UTF_8);
+
+        HttpResponse<String> res = send("GET", path, null);
+
+        if (res.statusCode() == 200) {
+            try {
+                OfferListResult parsed = gson.fromJson(res.body(), OfferListResult.class);
+                if (parsed == null) throw new ApiException("Respons server kosong.");
+                return parsed;
+            } catch (ApiException e) {
+                throw e;
+            } catch (Exception e) {
+                throw new ApiException("Gagal membaca daftar offer dari server.");
+            }
+        }
+
+        throw new ApiException(extractError(res, "Gagal mengambil daftar offer."));
+    }
+
+    /**
+     * POST /offers/respond — accept/reject offer dari in-game.
+     *
+     * @param decision "accept" atau "reject".
+     * @throws ApiException bila offer tak ditemukan, bukan milik pemain, atau bot mati.
+     */
+    public void respondOffer(int offerId, String decision, String minecraftUuid)
+            throws ApiException {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("minecraftUuid", minecraftUuid);
+        payload.addProperty("offerId", offerId);
+        payload.addProperty("decision", decision);
+
+        HttpResponse<String> res = send("POST", "/offers/respond", gson.toJson(payload));
+        if (res.statusCode() == 200) return;
+        throw new ApiException(extractError(res, "Gagal merespons offer."));
     }
 
     /** Bangun & kirim request; balut error jaringan jadi ApiException. */

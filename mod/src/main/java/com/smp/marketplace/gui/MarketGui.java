@@ -114,7 +114,39 @@ public class MarketGui {
             b.addLoreLine(text("\"" + l.description + "\"", Formatting.DARK_GRAY));
         }
         b.addLoreLine(text("#" + l.id, Formatting.DARK_GRAY));
+
+        // Aksi: klik kiri = info (beli langsung menyusul Fase E), klik kanan = tawar.
+        b.addLoreLine(text("", Formatting.GRAY));
+        b.addLoreLine(text("Klik kiri: Info / Beli", Formatting.GREEN));
+        b.addLoreLine(text("Klik kanan: Tawar (offer)", Formatting.YELLOW));
+
+        b.setCallback((idx, clickType, action, g) -> {
+            if (clickType.isRight) {
+                onOffer(l);
+            } else if (clickType.isLeft) {
+                onInfo(l);
+            }
+        });
         return b.build();
+    }
+
+    /**
+     * Klik kiri: tampilkan detail + info bahwa beli langsung (escrow) menyusul.
+     * "Beli langsung harga pas" butuh setor pembayaran fisik = Fase E (belum ada).
+     */
+    private void onInfo(ListingDto l) {
+        player.sendMessage(Text.literal("— Listing #" + l.id + " —").formatted(Formatting.GOLD), false);
+        player.sendMessage(text(l.itemLabel + " ×" + l.quantity, Formatting.WHITE), false);
+        player.sendMessage(text("Harga: " + l.priceText, Formatting.GRAY), false);
+        player.sendMessage(text(
+            "Beli langsung akan tersedia di update escrow. "
+                + "Untuk sekarang, klik kanan untuk menawar.", Formatting.DARK_GRAY), false);
+    }
+
+    /** Klik kanan: buka alur buat offer (pilih item bayar + ketik jumlah di sign). */
+    private void onOffer(ListingDto l) {
+        gui.close();
+        new OfferInputGui(player, api, l.id, l.itemLabel).open();
     }
 
     /** Tombol navigasi prev/next + indikator halaman. */

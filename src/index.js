@@ -75,7 +75,7 @@ async function main() {
 
   // Nyalakan REST server untuk mod (Fase C). Aman bila API_SECRET kosong:
   // fungsi ini akan melewati start & memberi peringatan.
-  startApiServer();
+  startApiServer(client);
 }
 
 main().catch((err) => {

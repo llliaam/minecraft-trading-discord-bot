@@ -38,6 +38,15 @@ export async function createOffer({ listingId, buyerId, priceItemKey, priceQuant
   return { offer, listing };
 }
 
+/** Ambil semua offer PENDING pada listing milik creatorId (utk /myoffers in-game). */
+export function getOffersForCreator(creatorId) {
+  return db.offer.findMany({
+    where: { status: "PENDING", listing: { creatorId } },
+    include: { listing: true },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
 /** Ambil satu offer beserta listing-nya (atau null). */
 export function getOfferWithListing(offerId) {
   return db.offer.findUnique({
