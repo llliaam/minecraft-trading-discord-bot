@@ -14,6 +14,8 @@ import { BusinessError } from "./transactionService.js";
  * @param {string} input.priceItemKey   id item pembayaran, mis. "minecraft:diamond".
  * @param {number} input.priceQuantity  jumlah item pembayaran.
  * @param {string|null} [input.description]
+ * @param {string|null} [input.escrowRef]  slot escrow di mod (untuk SELL yang
+ *                                          barangnya sudah disetor — Fase E).
  * @returns {Promise<object>} record Listing.
  */
 export function createListing(input) {
@@ -27,6 +29,7 @@ export function createListing(input) {
       priceItemKey: input.priceItemKey,
       priceQuantity: input.priceQuantity,
       description: input.description ?? null,
+      escrowRef: input.escrowRef ?? null,
     },
   });
 }
@@ -127,13 +130,26 @@ export function getMyListings(creatorId) {
  * Atomik: klaim dengan updateMany berfilter status ACTIVE supaya tidak
  * balapan dengan Buy Now / Accept offer yang sedang berjalan.
  *
+ * <p><b>Barang SELL (escrowRef ada)</b> ditangani berdasarkan `returnMode`:
+ * <ul>
+ *   <li><b>"ingame"</b> — pemain online (via mod). Node cuma melepas metadata
+ *       & mengembalikan `escrowRef`; mod yang menarik barang dari ledger.</li>
+ *   <li><b>"mailbox"</b> — via Discord (pemain bisa offline). Barang TETAP di
+ *       escrow; kita buat MailboxItem (CANCELLED_RETURN) yang menunjuk
+ *       `escrowRef` sama, diklaim in-game nanti. Node tetap tak menyentuh item.</li>
+ * </ul>
+ * Untuk listing BUY (tanpa escrow) kedua mode sama: cukup batalkan metadata.
+ *
  * @param {object} input
  * @param {number} input.listingId
  * @param {string} input.actorId   Discord user ID yang membatalkan.
- * @returns {Promise<{listing: object}>}
+ * @param {"ingame"|"mailbox"} [input.returnMode="mailbox"]
+ * @returns {Promise<{listing: object, escrowRef: string|null}>}
+ *          `escrowRef` non-null HANYA pada mode "ingame" bila ada barang untuk
+ *          ditarik mod; null selain itu.
  * @throws {BusinessError}
  */
-export async function cancelListing({ listingId, actorId }) {
+export async function cancelListing({ listingId, actorId, returnMode = "mailbox" }) {
   return db.$transaction(async (tx) => {
     const listing = await tx.listing.findUnique({ where: { id: listingId } });
 
@@ -160,6 +176,36 @@ export async function cancelListing({ listingId, actorId }) {
       throw new BusinessError("Listing ini baru saja berubah status.");
     }
 
-    return { listing: { ...listing, status: "CANCELLED" } };
+    const cancelled = { ...listing, status: "CANCELLED" };
+
+    // Tak ada barang di escrow (mis. BUY) → tak ada yang perlu dikembalikan.
+    if (!listing.escrowRef) {
+      return { listing: cancelled, escrowRef: null };
+    }
+
+    if (returnMode === "ingame") {
+      // Pemain online: mod yang menarik barang. Serahkan escrowRef.
+      return { listing: cancelled, escrowRef: listing.escrowRef };
+    }
+
+    // Mode mailbox (Discord/offline): barang tetap di escrow, dialihkan jadi
+    // titipan mailbox milik penjual. Withdraw fisik terjadi saat /claim.
+    await depositToMailboxTx(tx, {
+      ownerId: listing.creatorId,
+      escrowRef: listing.escrowRef,
+      itemKey: listing.itemKey,
+      itemLabel: listing.itemLabel,
+      quantity: listing.quantity,
+      reason: "CANCELLED_RETURN",
+    });
+
+    return { listing: cancelled, escrowRef: null };
+  });
+}
+
+/** Versi transaksional depositToMailbox (dipakai di dalam $transaction cancel). */
+function depositToMailboxTx(tx, { ownerId, escrowRef, itemKey, itemLabel, quantity, reason }) {
+  return tx.mailboxItem.create({
+    data: { ownerId, escrowRef, itemKey, itemLabel, quantity, reason },
   });
 }

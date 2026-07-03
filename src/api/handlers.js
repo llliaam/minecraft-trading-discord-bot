@@ -4,7 +4,12 @@
 // Konvensi: tiap handler menerima { body } dan mengembalikan { status, data }.
 // `body` sudah di-parse jadi objek (atau {} bila kosong). Error bisnis dilempar
 // sebagai BusinessError dan ditangkap oleh server jadi HTTP 400.
-import { browseListings, createListing, attachMessageId } from "../services/listingService.js";
+import {
+  browseListings,
+  createListing,
+  attachMessageId,
+  cancelListing,
+} from "../services/listingService.js";
 import { redeemLinkCode, getLinkByMc } from "../services/linkService.js";
 import {
   createOffer,
@@ -149,6 +154,89 @@ export async function createBuyListing({ body, client }) {
       priceText: formatPrice(listing.priceQuantity, listing.priceItemKey),
     },
   };
+}
+
+/**
+ * POST /listings/sell — buat listing SELL dari in-game (Fase E).
+ * Body: { minecraftUuid, escrowRef, itemKey, quantity, priceItemKey, priceQuantity, description? }.
+ *
+ * Barang sudah disetor ke escrow oleh mod SEBELUM endpoint ini dipanggil;
+ * `escrowRef` menautkan listing ke slot escrow fisiknya. Node tak pernah
+ * menyentuh item — hanya menyimpan metadata + escrowRef (lihat CLAUDE.md).
+ */
+export async function createSellListing({ body, client }) {
+  const { minecraftUuid, escrowRef, itemKey, quantity, priceItemKey, priceQuantity, description } =
+    body;
+  const creatorId = await resolveDiscordId(minecraftUuid);
+
+  if (!escrowRef || typeof escrowRef !== "string") {
+    throw new BusinessError("escrowRef wajib diisi untuk listing SELL.");
+  }
+  // Jalur in-game: item dari registry MC asli → validasi FORMAT saja.
+  if (!isValidKeyFormat(itemKey)) {
+    throw new BusinessError(`Item "${itemKey}" tidak valid.`);
+  }
+  if (!isValidKeyFormat(priceItemKey)) {
+    throw new BusinessError(`Item pembayaran "${priceItemKey}" tidak valid.`);
+  }
+
+  const listing = await createListing({
+    creatorId,
+    type: "SELL",
+    itemKey,
+    itemLabel: prettify(itemKey),
+    quantity,
+    priceItemKey,
+    priceQuantity,
+    description: description ?? null,
+    escrowRef,
+  });
+
+  const channel = await getMarketplaceChannel(client);
+  if (channel) {
+    const message = await channel.send({
+      embeds: [buildListingEmbed(listing)],
+      components: buildListingButtons(listing),
+    });
+    await attachMessageId(listing.id, message.id);
+  }
+
+  return {
+    status: 200,
+    data: {
+      id: listing.id,
+      type: listing.type,
+      itemKey: listing.itemKey,
+      itemLabel: listing.itemLabel,
+      quantity: listing.quantity,
+      priceItemKey: listing.priceItemKey,
+      priceQuantity: listing.priceQuantity,
+      priceText: formatPrice(listing.priceQuantity, listing.priceItemKey),
+    },
+  };
+}
+
+/**
+ * POST /listings/cancel — batalkan listing SELL/BUY sendiri dari in-game.
+ * Body: { minecraftUuid, listingId }.
+ *
+ * Pemain online (in-game) → mode "ingame": Node lepas metadata & kembalikan
+ * `escrowRef` agar mod menarik barang fisik. Node tak menyentuh item.
+ */
+export async function cancelListingFromGame({ body, client }) {
+  const { minecraftUuid, listingId } = body;
+  const actorId = await resolveDiscordId(minecraftUuid);
+
+  const { listing, escrowRef } = await cancelListing({
+    listingId,
+    actorId,
+    returnMode: "ingame",
+  });
+
+  // Sinkronkan embed di channel → ❌ Dibatalkan, tanpa tombol.
+  await updateListingMessage(client, listing);
+
+  return { status: 200, data: { ok: true, listingId: listing.id, escrowRef } };
 }
 
 /**

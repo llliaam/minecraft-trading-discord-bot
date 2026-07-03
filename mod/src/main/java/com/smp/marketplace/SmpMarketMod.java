@@ -3,12 +3,16 @@ package com.smp.marketplace;
 import com.smp.marketplace.command.BuyListingCommand;
 import com.smp.marketplace.command.DumpItemsCommand;
 import com.smp.marketplace.command.LinkCommand;
+import com.smp.marketplace.command.MarketCancelCommand;
 import com.smp.marketplace.command.MarketCommand;
 import com.smp.marketplace.command.MyOffersCommand;
+import com.smp.marketplace.command.SellCommand;
 import com.smp.marketplace.config.ModConfig;
+import com.smp.marketplace.escrow.EscrowLedger;
 import com.smp.marketplace.net.ApiClient;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -40,11 +44,19 @@ public class SmpMarketMod implements ModInitializer {
             MarketCommand.register(dispatcher, api);
             BuyListingCommand.register(dispatcher, api);
             MyOffersCommand.register(dispatcher, api);
+            SellCommand.register(dispatcher, api);
+            MarketCancelCommand.register(dispatcher, api);
             DumpItemsCommand.register(dispatcher);
         });
 
+        // Escrow (Fase E): muat ledger saat server siap = sumber kebenaran item.
+        // Persist tiap mutasi sudah ditangani EscrowLedger; hook STOPPING hanya
+        // jaring pengaman flush terakhir.
+        ServerLifecycleEvents.SERVER_STARTED.register(server -> EscrowLedger.get().load(server));
+        ServerLifecycleEvents.SERVER_STOPPING.register(server -> EscrowLedger.get().shutdown());
+
         LOGGER.info(
             "SMP Market mod ter-inisialisasi. Command /link /market /marketbuy "
-                + "/myoffers siap (offer via GUI /market).");
+                + "/myoffers /marketsell /marketcancel siap (offer via GUI /market).");
     }
 }

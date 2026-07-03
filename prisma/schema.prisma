@@ -39,6 +39,12 @@ enum TransactionStatus {
   COMPLETED // trade in-game selesai
 }
 
+enum MailboxReason {
+  SOLD_PAYMENT     // pembayaran hasil penjualan menunggu diklaim
+  CANCELLED_RETURN // barang SELL dikembalikan via cancel saat pemilik offline
+  OVERFLOW         // sisa yang tak muat saat klaim (inventory penuh)
+}
+
 // ===== Models =====
 
 // Peta akun Discord <-> Minecraft. Satu pemain = satu baris (relasi 1:1).
@@ -130,4 +136,23 @@ model Transaction {
   @@index([listingId])
   @@index([sellerId])
   @@index([buyerId])
+}
+
+// Kotak surat: item yang menunggu diklaim in-game oleh penerima (mis. saat
+// penerima offline). `escrowRef` menunjuk slot escrow yang menyimpan stack asli
+// di mod — item TAK berpindah saat MailboxItem dibuat; withdraw fisik terjadi
+// nanti saat pemain klaim in-game (lihat CLAUDE.md, Fase E3).
+model MailboxItem {
+  id        Int           @id @default(autoincrement())
+  ownerId   String // Discord user ID penerima
+  escrowRef String // slot escrow di mod yang menyimpan stack asli
+  itemKey   String // id kanonik MC (untuk tampilan/validasi)
+  itemLabel String // teks tampilan
+  quantity  Int           @default(1)
+  reason    MailboxReason
+  claimedAt DateTime? // NULL = belum diklaim
+  createdAt DateTime      @default(now())
+
+  @@index([ownerId])
+  @@index([claimedAt])
 }

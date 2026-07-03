@@ -40,6 +40,51 @@ public class ApiClient {
     }
 
     /**
+     * GET /health — cek bot hidup & bisa dihubungi. Tak melempar; true/false saja.
+     * Dipakai pre-flight sebelum menyetor barang ke escrow, agar barang tak jadi
+     * orphan (listing tak bisa dibuat) saat bot mati.
+     */
+    public boolean checkHealth() {
+        try {
+            HttpResponse<String> res = send("GET", "/health", null);
+            return res.statusCode() == 200;
+        } catch (ApiException e) {
+            return false;
+        }
+    }
+
+    /**
+     * POST /listings/cancel — batalkan listing SELL milik pemain dari in-game.
+     * Node melepas metadata listing lalu mengembalikan {@code escrowRef} slot
+     * escrow-nya; pemanggil (command) yang menarik barang dari ledger &
+     * mengembalikannya ke pemain. Node TAK menyentuh item (lihat CLAUDE.md).
+     *
+     * @return escrowRef slot yang harus ditarik, atau {@code null} bila listing
+     *         itu tak punya escrow (mis. listing BUY).
+     * @throws ApiException bila listing tak ditemukan, bukan milik pemain,
+     *         sudah ada deal berjalan, atau bot mati.
+     */
+    public String cancelListing(int listingId, String minecraftUuid) throws ApiException {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("minecraftUuid", minecraftUuid);
+        payload.addProperty("listingId", listingId);
+
+        HttpResponse<String> res = send("POST", "/listings/cancel", gson.toJson(payload));
+        if (res.statusCode() == 200) {
+            try {
+                JsonObject obj = gson.fromJson(res.body(), JsonObject.class);
+                if (obj != null && obj.has("escrowRef") && !obj.get("escrowRef").isJsonNull()) {
+                    return obj.get("escrowRef").getAsString();
+                }
+                return null;
+            } catch (Exception e) {
+                throw new ApiException("Gagal membaca respons pembatalan dari server.");
+            }
+        }
+        throw new ApiException(extractError(res, "Gagal membatalkan listing."));
+    }
+
+    /**
      * POST /link/redeem — tukar kode linking dari in-game.
      *
      * @param code          kode 6 karakter yang pemain ketik.
@@ -121,6 +166,38 @@ public class ApiClient {
         HttpResponse<String> res = send("POST", "/listings/buy", gson.toJson(payload));
         if (res.statusCode() == 200) return;
         throw new ApiException(extractError(res, "Gagal membuat listing."));
+    }
+
+    /**
+     * POST /listings/sell — buat listing SELL dari in-game. Barang SUDAH disetor
+     * ke escrow (ledger) sebelum metode ini dipanggil; {@code escrowRef} menautkan
+     * metadata listing ke slot escrow fisiknya.
+     *
+     * @param escrowRef     id slot escrow tempat barang disimpan.
+     * @throws ApiException bila item tak valid, belum linked, atau bot mati.
+     */
+    public void createSellListing(
+            String escrowRef,
+            String itemKey,
+            int quantity,
+            String priceItemKey,
+            int priceQuantity,
+            String description,
+            String minecraftUuid) throws ApiException {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("minecraftUuid", minecraftUuid);
+        payload.addProperty("escrowRef", escrowRef);
+        payload.addProperty("itemKey", itemKey);
+        payload.addProperty("quantity", quantity);
+        payload.addProperty("priceItemKey", priceItemKey);
+        payload.addProperty("priceQuantity", priceQuantity);
+        if (description != null) {
+            payload.addProperty("description", description);
+        }
+
+        HttpResponse<String> res = send("POST", "/listings/sell", gson.toJson(payload));
+        if (res.statusCode() == 200) return;
+        throw new ApiException(extractError(res, "Gagal membuat listing SELL."));
     }
 
     /**

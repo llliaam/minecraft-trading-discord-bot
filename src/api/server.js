@@ -16,6 +16,8 @@ const ROUTES = {
   "GET /listings": handlers.listings,
   "POST /link/redeem": handlers.linkRedeem,
   "POST /listings/buy": handlers.createBuyListing,
+  "POST /listings/sell": handlers.createSellListing,
+  "POST /listings/cancel": handlers.cancelListingFromGame,
   "POST /offers": handlers.createOfferFromGame,
   "GET /offers/mine": handlers.myOffers,
   "POST /offers/respond": handlers.respondOffer,

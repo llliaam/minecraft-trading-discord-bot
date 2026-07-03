@@ -22,7 +22,13 @@ export default {
 
     let result;
     try {
-      result = await cancelListing({ listingId, actorId: interaction.user.id });
+      // Via Discord pemain bisa OFFLINE → mode mailbox: barang SELL tetap di
+      // escrow, dialihkan jadi titipan mailbox untuk diklaim in-game nanti.
+      result = await cancelListing({
+        listingId,
+        actorId: interaction.user.id,
+        returnMode: "mailbox",
+      });
     } catch (err) {
       if (err instanceof BusinessError) {
         await interaction.editReply({ content: `⚠️ ${err.message}` });
@@ -36,8 +42,14 @@ export default {
     // Update embed di channel marketplace → ❌ Dibatalkan, tanpa tombol.
     await updateListingMessage(interaction.client, listing);
 
+    // Beri tahu bahwa barang SELL menanti di mailbox (klaim in-game).
+    const mailboxNote =
+      listing.type === "SELL" && listing.escrowRef
+        ? " Barangmu menunggu di **mailbox** — ambil in-game dengan `/claim` (menyusul)."
+        : "";
+
     await interaction.editReply({
-      content: `✅ Listing **#${listing.id}** (${listing.itemLabel}) dibatalkan.`,
+      content: `✅ Listing **#${listing.id}** (${listing.itemLabel}) dibatalkan.${mailboxNote}`,
     });
   },
 };
