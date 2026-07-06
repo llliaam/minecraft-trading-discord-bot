@@ -1,14 +1,10 @@
 // Router semua interaksi tombol. Dipanggil dari events/interactionCreate.js.
 import {
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
   MessageFlags,
 } from "discord.js";
-import { Action, buildId, parseId, decodeBrowse } from "../lib/ids.js";
+import { Action, parseId, decodeBrowse } from "../lib/ids.js";
 import { browseListings, getListing } from "../services/listingService.js";
 import {
-  buyNow,
   completeTransaction,
   BusinessError,
 } from "../services/transactionService.js";
@@ -29,10 +25,6 @@ export async function handleButton(interaction) {
   if (!parsed) return;
 
   switch (parsed.action) {
-    case Action.BUY_NOW:
-      return handleBuyNowPrompt(interaction, parsed.entityId);
-    case Action.BUY_CONFIRM:
-      return handleBuyConfirm(interaction, parsed.entityId);
     case Action.MAKE_OFFER:
       return handleMakeOffer(interaction, parsed.entityId);
     case Action.OFFER_ACCEPT:
@@ -86,79 +78,6 @@ async function handleBrowsePage(interaction) {
   await interaction.editReply({
     embeds: [buildListEmbed(page, { type: decoded.type })],
     components: buildBrowseButtons(page, decoded.type),
-  });
-}
-
-// ===== Buy Now: tahap 1 — tampilkan konfirmasi (ephemeral) =====
-async function handleBuyNowPrompt(interaction, listingId) {
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const listing = await getListing(listingId);
-
-  if (!listing || listing.status !== "ACTIVE") {
-    await interaction.editReply({ content: "⚠️ Listing ini sudah tidak aktif." });
-    return;
-  }
-  if (listing.creatorId === interaction.user.id) {
-    await interaction.editReply({ content: "⚠️ Kamu tidak bisa membeli listing-mu sendiri." });
-    return;
-  }
-
-  const isSell = listing.type === "SELL";
-  const verb = isSell ? "membeli" : "memenuhi permintaan";
-  const confirmRow = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId(buildId(Action.BUY_CONFIRM, listing.id))
-      .setLabel("Ya, lanjutkan")
-      .setEmoji("✅")
-      .setStyle(ButtonStyle.Success),
-  );
-
-  await interaction.editReply({
-    content:
-      `Kamu akan ${verb} **${listing.itemLabel}** ×${listing.quantity} ` +
-      `seharga **${formatPrice(listing.priceQuantity, listing.priceItemKey)}**.\nLanjutkan?`,
-    components: [confirmRow],
-  });
-}
-
-// ===== Buy Now: tahap 2 — eksekusi setelah konfirmasi =====
-async function handleBuyConfirm(interaction, listingId) {
-  await interaction.deferUpdate();
-  let result;
-  try {
-    result = await buyNow({ listingId, actorId: interaction.user.id });
-  } catch (err) {
-    if (err instanceof BusinessError) {
-      await interaction.editReply({ content: `⚠️ ${err.message}`, components: [] });
-      return;
-    }
-    throw err;
-  }
-
-  const { listing, transaction } = result;
-
-  // Update embed listing di channel → PENDING + tombol Mark Completed.
-  await updateListingMessage(interaction.client, listing, {
-    transactionId: transaction.id,
-  });
-
-  // Ping kedua pihak di channel marketplace.
-  const channel = await getMarketplaceChannel(interaction.client);
-  if (channel) {
-    await channel
-      .send({
-        content:
-          `🤝 **Deal!** <@${transaction.sellerId}> & <@${transaction.buyerId}> ` +
-          `untuk **${listing.itemLabel}** ×${listing.quantity} ` +
-          `(${formatPrice(listing.priceQuantity, listing.priceItemKey)}).\n` +
-          `Silakan koordinasi trade in-game. Klik **Tandai Selesai** di listing #${listing.id} bila sudah beres.`,
-      })
-      .catch(() => {});
-  }
-
-  await interaction.editReply({
-    content: `✅ Deal tercatat untuk listing #${listing.id}. Cek channel marketplace.`,
-    components: [],
   });
 }
 

@@ -18,9 +18,16 @@ const ROUTES = {
   "POST /listings/buy": handlers.createBuyListing,
   "POST /listings/sell": handlers.createSellListing,
   "POST /listings/cancel": handlers.cancelListingFromGame,
+  "POST /listings/purchase": handlers.purchaseListingFromGame,
+  "GET /listings/mine": handlers.myListingsFromGame,
+  "GET /mailbox": handlers.mailboxList,
+  "POST /mailbox/claim": handlers.mailboxClaim,
   "POST /offers": handlers.createOfferFromGame,
   "GET /offers/mine": handlers.myOffers,
   "POST /offers/respond": handlers.respondOffer,
+  "POST /players/online": handlers.playerJoin,
+  "DELETE /players/online": handlers.playerQuit,
+  "GET /players/online": handlers.playerOnlineCheck,
 };
 
 // Endpoint yang boleh diakses tanpa token (cuma health check).
@@ -85,7 +92,7 @@ async function handleRequest(req, res, client) {
 
   // Parse body JSON (untuk POST/PUT). Body kosong -> {}.
   let body = {};
-  if (req.method === "POST" || req.method === "PUT") {
+  if (req.method === "POST" || req.method === "PUT" || req.method === "DELETE") {
     const raw = await readBody(req);
     if (raw) {
       try {

@@ -36,3 +36,37 @@ export function getUnclaimedMailbox(ownerId) {
     orderBy: { createdAt: "desc" },
   });
 }
+
+/**
+ * Tandai mailbox item sebagai diklaim. Hanya pemilik yang boleh klaim.
+ * Mengembalikan `escrowRef` agar mod bisa menarik stack fisik dari ledger.
+ *
+ * Idempoten: bila item sudah diklaim sebelumnya, lempar BusinessError agar
+ * mod tidak mencoba withdraw ulang (slot sudah kosong).
+ *
+ * @param {object} input
+ * @param {number} input.mailboxId  PK MailboxItem.
+ * @param {string} input.ownerId   Discord user ID penuntut klaim.
+ * @returns {Promise<{mailboxItem: object, escrowRef: string}>}
+ * @throws {import("./transactionService.js").BusinessError}
+ */
+export async function claimMailboxItem({ mailboxId, ownerId }) {
+  const { BusinessError } = await import("./transactionService.js");
+
+  const item = await db.mailboxItem.findUnique({ where: { id: mailboxId } });
+
+  if (!item) throw new BusinessError("Item mailbox tidak ditemukan.");
+  if (item.ownerId !== ownerId) {
+    throw new BusinessError("Item ini bukan milikmu.");
+  }
+  if (item.claimedAt !== null) {
+    throw new BusinessError("Item ini sudah diklaim sebelumnya.");
+  }
+
+  const updated = await db.mailboxItem.update({
+    where: { id: mailboxId },
+    data: { claimedAt: new Date() },
+  });
+
+  return { mailboxItem: updated, escrowRef: item.escrowRef };
+}

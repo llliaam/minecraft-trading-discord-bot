@@ -68,13 +68,14 @@ export async function browseListings({ type, page = 1 } = {}) {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const safePage = Math.min(Math.max(1, page), totalPages);
 
-  const items = await db.listing.findMany({
+  const rawItems = await db.listing.findMany({
     where,
     orderBy: { createdAt: "desc" },
     skip: (safePage - 1) * PAGE_SIZE,
     take: PAGE_SIZE,
   });
 
+  const items = await attachCreatorNames(rawItems);
   return { items, total, page: safePage, totalPages };
 }
 
@@ -98,12 +99,13 @@ export async function searchListings({ query, type, limit = 10 }) {
   if (type) where.type = type;
 
   const total = await db.listing.count({ where });
-  const items = await db.listing.findMany({
+  const rawItems = await db.listing.findMany({
     where,
     orderBy: { createdAt: "desc" },
     take: limit,
   });
 
+  const items = await attachCreatorNames(rawItems);
   // Bentuk return disamakan dengan browseListings agar bisa pakai buildListEmbed.
   return { items, total, page: 1, totalPages: 1 };
 }
@@ -115,11 +117,30 @@ export async function searchListings({ query, type, limit = 10 }) {
  * @param {string} creatorId  Discord user ID.
  * @returns {Promise<object[]>} daftar record Listing.
  */
-export function getMyListings(creatorId) {
-  return db.listing.findMany({
+export async function getMyListings(creatorId) {
+  const items = await db.listing.findMany({
     where: { creatorId, status: { in: ["ACTIVE", "PENDING"] } },
     orderBy: { createdAt: "desc" },
   });
+  return attachCreatorNames(items);
+}
+
+/**
+ * Enrichment helper: tambahkan `creatorName` (minecraftName dari PlayerLink)
+ * ke tiap listing. Bila pemain belum linked, `creatorName` = null.
+ * Batch: satu query ke PlayerLink untuk semua creatorId unik.
+ */
+async function attachCreatorNames(listings) {
+  if (listings.length === 0) return listings;
+
+  const ids = [...new Set(listings.map((l) => l.creatorId))];
+  const links = await db.playerLink.findMany({
+    where: { discordId: { in: ids } },
+    select: { discordId: true, minecraftName: true },
+  });
+
+  const nameMap = Object.fromEntries(links.map((l) => [l.discordId, l.minecraftName]));
+  return listings.map((l) => ({ ...l, creatorName: nameMap[l.creatorId] ?? null }));
 }
 
 /**

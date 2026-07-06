@@ -3,8 +3,6 @@
 // customId Discord dibatasi 100 karakter; format pendek ini aman.
 
 export const Action = {
-  BUY_NOW: "buynow", // tombol Buy Now di embed listing → listingId (munculkan konfirmasi)
-  BUY_CONFIRM: "buyok", // tombol konfirmasi beli (ephemeral) → listingId
   MAKE_OFFER: "offer", // tombol Make Offer di embed listing → arahkan ke /offer
   // OFFER_MODAL dipensiunkan: pembuatan offer kini via slash /offer (modal Discord
   // tak mendukung autocomplete item). Dibiarkan sbg catatan sejarah, tak dipakai.

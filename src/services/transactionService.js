@@ -1,5 +1,6 @@
-// Logika bisnis transaksi (Buy Now & penyelesaian).
+// Logika bisnis transaksi marketplace.
 import { db } from "../lib/db.js";
+import { prettify } from "../lib/itemCatalog.js";
 
 /**
  * Error bisnis dengan pesan ramah untuk ditampilkan ke user.
@@ -8,61 +9,82 @@ import { db } from "../lib/db.js";
 export class BusinessError extends Error {}
 
 /**
- * Eksekusi "Buy Now" terhadap sebuah listing.
+ * Eksekusi pembelian escrow-aware dari in-game (Fase E2).
  *
- * Untuk listing SELL: creator = seller, pengklik = buyer.
- * Untuk listing BUY : creator = buyer,  pengklik = seller (memenuhi permintaan).
- *
- * Atomik: listing "diklaim" dengan updateMany berfilter status ACTIVE,
- * sehingga dua orang yang klik bersamaan tidak bisa sama-sama berhasil.
+ * Hanya untuk listing SELL. Pembeli sudah menyetor pembayaran ke escrow
+ * (oleh mod) sebelum endpoint ini dipanggil. Node:
+ * 1. Klaim listing ACTIVE→COMPLETED atomik (anti balapan).
+ * 2. Buat Transaction(COMPLETED) langsung — swap atomik = settlement.
+ * 3. Simpan MailboxItem SOLD_PAYMENT untuk penjual (bayaran menunggu diklaim).
+ * 4. Kembalikan escrowRefToRelease (escrow barang-jual) agar mod menarik &
+ *    menyerahkan barang ke pembeli. Node TAK menyentuh item.
  *
  * @param {object} input
  * @param {number} input.listingId
- * @param {string} input.actorId   Discord user ID yang menekan Buy Now.
- * @returns {Promise<{listing: object, transaction: object}>}
+ * @param {string} input.buyerId         Discord user ID pembeli.
+ * @param {string} input.paymentEscrowRef escrowRef slot pembayaran di mod.
+ * @returns {Promise<{listing: object, transaction: object, escrowRefToRelease: string}>}
  * @throws {BusinessError}
  */
-export async function buyNow({ listingId, actorId }) {
+export async function purchaseListing({ listingId, buyerId, paymentEscrowRef }) {
   return db.$transaction(async (tx) => {
     const listing = await tx.listing.findUnique({ where: { id: listingId } });
 
     if (!listing) throw new BusinessError("Listing tidak ditemukan.");
-    if (listing.status !== "ACTIVE") {
-      throw new BusinessError("Listing ini sudah tidak aktif.");
+    if (listing.type !== "SELL") {
+      throw new BusinessError("Listing ini bukan tipe SELL. Gunakan sistem offer untuk listing BUY.");
     }
-    if (listing.creatorId === actorId) {
+    if (listing.status !== "ACTIVE") {
+      throw new BusinessError("Listing ini sudah tidak aktif (mungkin sudah dibeli orang lain).");
+    }
+    if (!listing.escrowRef) {
+      throw new BusinessError("Listing ini belum punya barang di escrow. Hubungi admin.");
+    }
+    if (listing.creatorId === buyerId) {
       throw new BusinessError("Kamu tidak bisa membeli listing-mu sendiri.");
     }
 
-    // Klaim listing: hanya berhasil jika masih ACTIVE.
+    // Klaim atomik: hanya berhasil jika listing masih ACTIVE.
+    // Kalau dua pembeli klik bersamaan, salah satu dapat count===0 → error ramah.
     const claimed = await tx.listing.updateMany({
       where: { id: listingId, status: "ACTIVE" },
-      data: { status: "PENDING" },
+      data: { status: "COMPLETED" },
     });
     if (claimed.count === 0) {
-      // Orang lain mendahului di antara findUnique & updateMany.
-      throw new BusinessError("Listing ini baru saja diambil orang lain.");
+      throw new BusinessError("Listing ini baru saja diambil orang lain. Coba listing lain.");
     }
 
-    // Tentukan peran berdasarkan tipe listing.
-    const isSell = listing.type === "SELL";
-    const sellerId = isSell ? listing.creatorId : actorId;
-    const buyerId = isSell ? actorId : listing.creatorId;
-
+    const now = new Date();
     const transaction = await tx.transaction.create({
       data: {
         listingId: listing.id,
-        offerId: null, // Buy Now tidak melalui offer
-        sellerId,
+        offerId: null,
+        sellerId: listing.creatorId,
         buyerId,
         finalItemKey: listing.priceItemKey,
         finalQuantity: listing.priceQuantity,
-        status: "AGREED",
+        status: "COMPLETED",
+        completedAt: now,
       },
     });
 
-    const updatedListing = { ...listing, status: "PENDING" };
-    return { listing: updatedListing, transaction };
+    // Pembayaran masuk mailbox penjual (bisa online/offline).
+    await tx.mailboxItem.create({
+      data: {
+        ownerId: listing.creatorId,
+        escrowRef: paymentEscrowRef,
+        itemKey: listing.priceItemKey,
+        itemLabel: prettify(listing.priceItemKey),
+        quantity: listing.priceQuantity,
+        reason: "SOLD_PAYMENT",
+      },
+    });
+
+    return {
+      listing: { ...listing, status: "COMPLETED" },
+      transaction,
+      escrowRefToRelease: listing.escrowRef,
+    };
   });
 }
 

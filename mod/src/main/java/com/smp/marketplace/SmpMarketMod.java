@@ -1,10 +1,12 @@
 package com.smp.marketplace;
 
 import com.smp.marketplace.command.BuyListingCommand;
+import com.smp.marketplace.command.ClaimCommand;
 import com.smp.marketplace.command.DumpItemsCommand;
 import com.smp.marketplace.command.LinkCommand;
 import com.smp.marketplace.command.MarketCancelCommand;
 import com.smp.marketplace.command.MarketCommand;
+import com.smp.marketplace.command.MyListingCommand;
 import com.smp.marketplace.command.MyOffersCommand;
 import com.smp.marketplace.command.SellCommand;
 import com.smp.marketplace.config.ModConfig;
@@ -13,6 +15,7 @@ import com.smp.marketplace.net.ApiClient;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -46,6 +49,8 @@ public class SmpMarketMod implements ModInitializer {
             MyOffersCommand.register(dispatcher, api);
             SellCommand.register(dispatcher, api);
             MarketCancelCommand.register(dispatcher, api);
+            ClaimCommand.register(dispatcher, api);
+            MyListingCommand.register(dispatcher, api);
             DumpItemsCommand.register(dispatcher);
         });
 
@@ -55,8 +60,28 @@ public class SmpMarketMod implements ModInitializer {
         ServerLifecycleEvents.SERVER_STARTED.register(server -> EscrowLedger.get().load(server));
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> EscrowLedger.get().shutdown());
 
+        // Sync presence pemain ke bot agar /cancel Discord bisa cek online status.
+        ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
+            String uuid = handler.player.getUuidAsString();
+            new Thread(() -> {
+                try { api.playerJoin(uuid); }
+                catch (ApiClient.ApiException e) {
+                    LOGGER.warn("Gagal lapor join pemain {} ke bot: {}", uuid, e.getMessage());
+                }
+            }, "smpmarket-presence-join").start();
+        });
+        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
+            String uuid = handler.player.getUuidAsString();
+            new Thread(() -> {
+                try { api.playerQuit(uuid); }
+                catch (ApiClient.ApiException e) {
+                    LOGGER.warn("Gagal lapor quit pemain {} ke bot: {}", uuid, e.getMessage());
+                }
+            }, "smpmarket-presence-quit").start();
+        });
+
         LOGGER.info(
             "SMP Market mod ter-inisialisasi. Command /link /market /marketbuy "
-                + "/myoffers /marketsell /marketcancel siap (offer via GUI /market).");
+                + "/myoffers /marketsell /marketcancel /myclaim /mylisting siap (offer via GUI /market).");
     }
 }

@@ -1,8 +1,10 @@
 // /cancel — batalkan listing sendiri yang masih ACTIVE.
 import { SlashCommandBuilder, MessageFlags } from "discord.js";
 import { cancelListing } from "../services/listingService.js";
+import { getLinkByDiscord } from "../services/linkService.js";
 import { BusinessError } from "../services/transactionService.js";
 import { updateListingMessage } from "../lib/marketplace.js";
+import { isOnline } from "../lib/onlinePlayers.js";
 
 export default {
   data: new SlashCommandBuilder()
@@ -20,14 +22,18 @@ export default {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const listingId = interaction.options.getInteger("id", true);
 
+    // Cek apakah pemain sedang online di MC → kalau online, barang langsung
+    // dikembalikan ke inventory via mod (bukan mailbox).
+    const link = await getLinkByDiscord(interaction.user.id);
+    const playerOnline = link ? isOnline(link.minecraftUuid) : false;
+    const returnMode = playerOnline ? "ingame" : "mailbox";
+
     let result;
     try {
-      // Via Discord pemain bisa OFFLINE → mode mailbox: barang SELL tetap di
-      // escrow, dialihkan jadi titipan mailbox untuk diklaim in-game nanti.
       result = await cancelListing({
         listingId,
         actorId: interaction.user.id,
-        returnMode: "mailbox",
+        returnMode,
       });
     } catch (err) {
       if (err instanceof BusinessError) {
@@ -37,19 +43,30 @@ export default {
       throw err;
     }
 
-    const { listing } = result;
+    const { listing, escrowRef } = result;
 
     // Update embed di channel marketplace → ❌ Dibatalkan, tanpa tombol.
     await updateListingMessage(interaction.client, listing);
 
-    // Beri tahu bahwa barang SELL menanti di mailbox (klaim in-game).
-    const mailboxNote =
-      listing.type === "SELL" && listing.escrowRef
-        ? " Barangmu menunggu di **mailbox** — ambil in-game dengan `/claim` (menyusul)."
-        : "";
+    // Jika returnMode "ingame", mod harus menarik barang dari escrow.
+    // Kita panggil endpoint REST mod (atau biarkan mod lakukan via perintah terpisah).
+    // Karena Node tidak push ke mod (hanya mod yang pull dari Node), kita simpan
+    // escrowRef sebagai "perlu ditarik mod" — dalam praktik: pemain online →
+    // sampaikan lewat pesan Discord bahwa mereka perlu ketik /marketcancel <id>
+    // ATAU kita ubah agar handler ini langsung kirim REST ke mod via ApiClient Node.
+    // Pendekatan sederhana: kalau online → minta pemain ketik /marketcancel in-game.
+    // Pendekatan ini konsisten: semua penarikan fisik item hanya dari in-game.
+    let note = "";
+    if (listing.type === "SELL" && listing.escrowRef) {
+      if (playerOnline) {
+        note = " Kamu sedang online — ketik **`/marketcancel " + listingId + "`** in-game untuk mengambil barang dari escrow.";
+      } else {
+        note = " Barangmu menunggu di **mailbox** — ambil in-game dengan `/myclaim` saat kamu login.";
+      }
+    }
 
     await interaction.editReply({
-      content: `✅ Listing **#${listing.id}** (${listing.itemLabel}) dibatalkan.${mailboxNote}`,
+      content: `✅ Listing **#${listing.id}** (${listing.itemLabel}) dibatalkan.${note}`,
     });
   },
 };

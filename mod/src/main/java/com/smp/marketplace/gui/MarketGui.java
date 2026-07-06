@@ -110,6 +110,9 @@ public class MarketGui {
             .addLoreLine(text("Jumlah: " + l.quantity, Formatting.GRAY))
             .addLoreLine(text("Harga: " + l.priceText, Formatting.GOLD));
 
+        if (l.creatorName != null && !l.creatorName.isBlank()) {
+            b.addLoreLine(text("Penjual: " + l.creatorName, Formatting.DARK_AQUA));
+        }
         if (l.description != null && !l.description.isBlank()) {
             b.addLoreLine(text("\"" + l.description + "\"", Formatting.DARK_GRAY));
         }
@@ -131,16 +134,22 @@ public class MarketGui {
     }
 
     /**
-     * Klik kiri: tampilkan detail + info bahwa beli langsung (escrow) menyusul.
-     * "Beli langsung harga pas" butuh setor pembayaran fisik = Fase E (belum ada).
+     * Klik kiri: buka GUI setor pembayaran untuk listing SELL, atau tampilkan info
+     * untuk listing BUY (fulfill BUY belum diimplementasi — scope E2 hanya SELL).
      */
     private void onInfo(ListingDto l) {
-        player.sendMessage(Text.literal("— Listing #" + l.id + " —").formatted(Formatting.GOLD), false);
-        player.sendMessage(text(l.itemLabel + " ×" + l.quantity, Formatting.WHITE), false);
-        player.sendMessage(text("Harga: " + l.priceText, Formatting.GRAY), false);
-        player.sendMessage(text(
-            "Beli langsung akan tersedia di update escrow. "
-                + "Untuk sekarang, klik kanan untuk menawar.", Formatting.DARK_GRAY), false);
+        if ("SELL".equals(l.type)) {
+            gui.close();
+            new PurchaseDepositGui(player, api, l).open();
+        } else {
+            // Listing BUY (wishlist orang lain): tampilkan info saja.
+            player.sendMessage(Text.literal("— Listing #" + l.id + " —").formatted(Formatting.GOLD), false);
+            player.sendMessage(text(l.itemLabel + " ×" + l.quantity, Formatting.WHITE), false);
+            player.sendMessage(text("Harga: " + l.priceText, Formatting.GRAY), false);
+            player.sendMessage(text(
+                "Listing BELI: pemilik mencari item ini. Gunakan klik kanan untuk menawar harga.",
+                Formatting.DARK_GRAY), false);
+        }
     }
 
     /** Klik kanan: buka alur buat offer (pilih item bayar + ketik jumlah di sign). */

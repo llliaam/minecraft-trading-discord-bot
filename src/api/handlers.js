@@ -9,7 +9,9 @@ import {
   createListing,
   attachMessageId,
   cancelListing,
+  getMyListings,
 } from "../services/listingService.js";
+import { getUnclaimedMailbox, claimMailboxItem } from "../services/mailboxService.js";
 import { redeemLinkCode, getLinkByMc } from "../services/linkService.js";
 import {
   createOffer,
@@ -17,8 +19,9 @@ import {
   acceptOffer,
   rejectOffer,
 } from "../services/offerService.js";
-import { BusinessError } from "../services/transactionService.js";
+import { BusinessError, purchaseListing } from "../services/transactionService.js";
 import { formatPrice, isValidKeyFormat, prettify } from "../lib/itemCatalog.js";
+import { markOnline, markOffline, isOnline } from "../lib/onlinePlayers.js";
 import {
   buildListingEmbed,
   buildListingButtons,
@@ -58,6 +61,7 @@ export async function listings({ query }) {
         priceText: formatPrice(l.priceQuantity, l.priceItemKey),
         description: l.description ?? null,
         creatorId: l.creatorId,
+        creatorName: l.creatorName ?? null,
       })),
       page: result.page,
       totalPages: result.totalPages,
@@ -316,6 +320,143 @@ export async function myOffers({ query }) {
 }
 
 /**
+ * GET /mailbox — daftar item mailbox yang belum diklaim milik pemain.
+ * Query: ?minecraftUuid=.
+ * Dipakai GUI `/myclaim` in-game untuk menampilkan daftar item menunggu.
+ */
+export async function mailboxList({ query }) {
+  const ownerId = await resolveDiscordId(query.minecraftUuid);
+  const items = await getUnclaimedMailbox(ownerId);
+
+  return {
+    status: 200,
+    data: {
+      items: items.map((m) => ({
+        id: m.id,
+        escrowRef: m.escrowRef,
+        itemKey: m.itemKey,
+        itemLabel: m.itemLabel,
+        quantity: m.quantity,
+        reason: m.reason,
+        createdAt: m.createdAt.toISOString(),
+      })),
+    },
+  };
+}
+
+/**
+ * POST /mailbox/claim — klaim satu item mailbox dari in-game (Fase E3).
+ * Body: { minecraftUuid, mailboxId }.
+ *
+ * Node menandai item sebagai diklaim (claimedAt=now) dan mengembalikan
+ * `escrowRef` agar mod menarik stack fisik dari ledger → serahkan ke pemain.
+ * Overflow (inventory penuh) ditangani mod: sisa masuk mailbox baru via
+ * endpoint ini dengan item baru — atau mod pakai offerOrDrop (item jatuh
+ * ke lantai jika inventory penuh). Node TAK menyentuh item.
+ */
+export async function mailboxClaim({ body }) {
+  const { minecraftUuid, mailboxId } = body;
+
+  if (!mailboxId || typeof mailboxId !== "number") {
+    throw new BusinessError("mailboxId wajib diisi (integer).");
+  }
+
+  const ownerId = await resolveDiscordId(minecraftUuid);
+  const { mailboxItem, escrowRef } = await claimMailboxItem({ mailboxId, ownerId });
+
+  return {
+    status: 200,
+    data: {
+      ok: true,
+      mailboxId: mailboxItem.id,
+      escrowRef,
+      itemLabel: mailboxItem.itemLabel,
+      quantity: mailboxItem.quantity,
+    },
+  };
+}
+
+/**
+ * GET /listings/mine — listing ACTIVE & PENDING milik pemain (untuk GUI in-game).
+ * Query: ?minecraftUuid=.
+ */
+export async function myListingsFromGame({ query }) {
+  const creatorId = await resolveDiscordId(query.minecraftUuid);
+  const items = await getMyListings(creatorId);
+
+  return {
+    status: 200,
+    data: {
+      items: items.map((l) => ({
+        id: l.id,
+        type: l.type,
+        itemKey: l.itemKey,
+        itemLabel: l.itemLabel,
+        quantity: l.quantity,
+        priceItemKey: l.priceItemKey,
+        priceQuantity: l.priceQuantity,
+        priceText: formatPrice(l.priceQuantity, l.priceItemKey),
+        status: l.status,
+        description: l.description ?? null,
+        escrowRef: l.escrowRef ?? null,
+        creatorName: l.creatorName ?? null,
+      })),
+    },
+  };
+}
+
+/**
+ * POST /listings/purchase — beli listing SELL dari in-game (Fase E2).
+ * Body: { minecraftUuid, listingId, paymentEscrowRef }.
+ *
+ * Pembeli sudah menyetor pembayaran ke escrow SEBELUM endpoint ini dipanggil.
+ * Node klaim listing ACTIVE→COMPLETED atomik, buat Transaction, buat MailboxItem
+ * SOLD_PAYMENT untuk penjual, lalu kembalikan escrowRef barang-jual agar mod
+ * menarik & menyerahkannya ke pembeli. Node TAK menyentuh item.
+ */
+export async function purchaseListingFromGame({ body, client }) {
+  const { minecraftUuid, listingId, paymentEscrowRef } = body;
+
+  if (!paymentEscrowRef || typeof paymentEscrowRef !== "string") {
+    throw new BusinessError("paymentEscrowRef wajib diisi.");
+  }
+
+  const buyerId = await resolveDiscordId(minecraftUuid);
+
+  const { listing, transaction, escrowRefToRelease } = await purchaseListing({
+    listingId,
+    buyerId,
+    paymentEscrowRef,
+  });
+
+  // Sinkronkan embed di channel → ✅ Selesai, tanpa tombol.
+  await updateListingMessage(client, listing);
+
+  // Notifikasi channel.
+  const channel = await getMarketplaceChannel(client);
+  if (channel) {
+    await channel
+      .send({
+        content:
+          `✅ **Terjual!** <@${listing.creatorId}> — listing #${listing.id} ` +
+          `(**${listing.itemLabel}** ×${listing.quantity}) dibeli oleh <@${buyerId}>. ` +
+          `Pembayaran menunggu di mailbox penjual.`,
+      })
+      .catch(() => {});
+  }
+
+  return {
+    status: 200,
+    data: {
+      ok: true,
+      listingId: listing.id,
+      transactionId: transaction.id,
+      escrowRef: escrowRefToRelease,
+    },
+  };
+}
+
+/**
  * POST /offers/respond — accept/reject offer dari in-game.
  * Body: { minecraftUuid, offerId, decision } dengan decision = "accept" | "reject".
  */
@@ -351,4 +492,36 @@ export async function respondOffer({ body, client }) {
   }
 
   return { status: 200, data: { ok: true, offerId: offer.id, status: offer.status } };
+}
+
+/**
+ * POST /players/online — mod beritahu bot bahwa pemain join.
+ * Body: { minecraftUuid }.
+ */
+export function playerJoin({ body }) {
+  const { minecraftUuid } = body;
+  if (!minecraftUuid) throw new BusinessError("minecraftUuid wajib diisi.");
+  markOnline(minecraftUuid);
+  return { status: 200, data: { ok: true } };
+}
+
+/**
+ * DELETE /players/online — mod beritahu bot bahwa pemain quit.
+ * Body: { minecraftUuid }.
+ */
+export function playerQuit({ body }) {
+  const { minecraftUuid } = body;
+  if (!minecraftUuid) throw new BusinessError("minecraftUuid wajib diisi.");
+  markOffline(minecraftUuid);
+  return { status: 200, data: { ok: true } };
+}
+
+/**
+ * GET /players/online/:uuid — cek apakah pemain dengan UUID tertentu sedang online.
+ * Dipakai Discord /cancel untuk memilih returnMode.
+ */
+export function playerOnlineCheck({ query }) {
+  const { minecraftUuid } = query;
+  if (!minecraftUuid) throw new BusinessError("minecraftUuid wajib diisi.");
+  return { status: 200, data: { online: isOnline(minecraftUuid) } };
 }

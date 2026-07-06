@@ -20,4 +20,7 @@ public class ListingDto {
     public String priceText;     // harga siap-tampil, mis. "64× Diamond"
     public String description;   // boleh null
     public String creatorId;
+    public String creatorName;   // minecraftName penjual (dari PlayerLink), bisa null
+    public String status;        // "ACTIVE" | "PENDING" | dll (ada di /listings/mine)
+    public String escrowRef;     // ada di /listings/mine, null untuk BUY
 }

@@ -4,7 +4,9 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.smp.marketplace.SmpMarketMod;
 import com.smp.marketplace.config.ModConfig;
+import com.smp.marketplace.model.ListingDto;
 import com.smp.marketplace.model.ListingPage;
+import com.smp.marketplace.model.MailboxListResult;
 import com.smp.marketplace.model.OfferListResult;
 
 import java.net.URI;
@@ -201,6 +203,46 @@ public class ApiClient {
     }
 
     /**
+     * POST /listings/purchase — beli listing SELL dari in-game (Fase E2).
+     *
+     * <p>Pembayaran SUDAH disetor ke escrow sebelum metode ini dipanggil.
+     * Bila berhasil, Node klaim listing dan mengembalikan {@code escrowRef}
+     * barang-jual; pemanggil menarik barang dari ledger &amp; menyerahkan ke pembeli.
+     * Bila gagal, pemanggil WAJIB menarik pembayaran dari escrow (refund ke pembeli).
+     *
+     * @param listingId       ID listing SELL yang ingin dibeli.
+     * @param minecraftUuid   UUID pembeli.
+     * @param paymentEscrowRef escrowRef slot pembayaran yang sudah disetor.
+     * @param opId            ID operasi unik untuk idempotency.
+     * @return escrowRef barang-jual (untuk withdraw oleh mod → serahkan ke pembeli).
+     * @throws ApiException bila listing tidak ditemukan/aktif, race condition,
+     *         pembeli = penjual, belum linked, atau bot mati.
+     */
+    public String purchaseListing(int listingId, String minecraftUuid,
+            String paymentEscrowRef, String opId) throws ApiException {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("minecraftUuid", minecraftUuid);
+        payload.addProperty("listingId", listingId);
+        payload.addProperty("paymentEscrowRef", paymentEscrowRef);
+
+        HttpResponse<String> res = send("POST", "/listings/purchase", gson.toJson(payload));
+        if (res.statusCode() == 200) {
+            try {
+                JsonObject obj = gson.fromJson(res.body(), JsonObject.class);
+                if (obj != null && obj.has("escrowRef") && !obj.get("escrowRef").isJsonNull()) {
+                    return obj.get("escrowRef").getAsString();
+                }
+                throw new ApiException("Respons server tidak menyertakan escrowRef barang.");
+            } catch (ApiException e) {
+                throw e;
+            } catch (Exception e) {
+                throw new ApiException("Gagal membaca respons pembelian dari server.");
+            }
+        }
+        throw new ApiException(extractError(res, "Gagal memproses pembelian."));
+    }
+
+    /**
      * POST /offers — buat offer/nego harga terhadap listing dari in-game.
      *
      * @throws ApiException bila listing tak ditemukan, item tak dikenali, atau bot mati.
@@ -269,6 +311,127 @@ public class ApiClient {
         throw new ApiException(extractError(res, "Gagal merespons offer."));
     }
 
+    /**
+     * GET /mailbox — daftar item mailbox yang belum diklaim milik pemain.
+     *
+     * @param minecraftUuid UUID pemain.
+     * @return daftar item mailbox (kosong bila tidak ada).
+     * @throws ApiException bila belum linked atau bot mati.
+     */
+    public MailboxListResult fetchMailbox(String minecraftUuid) throws ApiException {
+        String path = "/mailbox?minecraftUuid="
+            + URLEncoder.encode(minecraftUuid, StandardCharsets.UTF_8);
+
+        HttpResponse<String> res = send("GET", path, null);
+
+        if (res.statusCode() == 200) {
+            try {
+                MailboxListResult parsed = gson.fromJson(res.body(), MailboxListResult.class);
+                if (parsed == null) throw new ApiException("Respons server kosong.");
+                return parsed;
+            } catch (ApiException e) {
+                throw e;
+            } catch (Exception e) {
+                throw new ApiException("Gagal membaca daftar mailbox dari server.");
+            }
+        }
+
+        throw new ApiException(extractError(res, "Gagal mengambil mailbox."));
+    }
+
+    /**
+     * POST /mailbox/claim — klaim satu item mailbox dari in-game (Fase E3).
+     *
+     * <p>Node menandai item diklaim lalu mengembalikan {@code escrowRef} slot escrow-nya.
+     * Pemanggil WAJIB memanggil {@link com.smp.marketplace.escrow.EscrowLedger#withdraw}
+     * dengan ref tersebut untuk menyerahkan item fisik ke pemain.
+     *
+     * @param mailboxId    ID MailboxItem yang ingin diklaim.
+     * @param minecraftUuid UUID pemain penuntut klaim.
+     * @return escrowRef slot yang berisi item (untuk withdraw).
+     * @throws ApiException bila item tidak ditemukan, bukan milik pemain,
+     *         sudah diklaim, belum linked, atau bot mati.
+     */
+    public String claimMailboxItem(int mailboxId, String minecraftUuid) throws ApiException {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("minecraftUuid", minecraftUuid);
+        payload.addProperty("mailboxId", mailboxId);
+
+        HttpResponse<String> res = send("POST", "/mailbox/claim", gson.toJson(payload));
+        if (res.statusCode() == 200) {
+            try {
+                JsonObject obj = gson.fromJson(res.body(), JsonObject.class);
+                if (obj != null && obj.has("escrowRef") && !obj.get("escrowRef").isJsonNull()) {
+                    return obj.get("escrowRef").getAsString();
+                }
+                throw new ApiException("Respons server tidak menyertakan escrowRef.");
+            } catch (ApiException e) {
+                throw e;
+            } catch (Exception e) {
+                throw new ApiException("Gagal membaca respons klaim dari server.");
+            }
+        }
+        throw new ApiException(extractError(res, "Gagal mengklaim item mailbox."));
+    }
+
+    /**
+     * GET /listings/mine — listing ACTIVE & PENDING milik pemain (untuk GUI /mylisting).
+     *
+     * @param minecraftUuid UUID pemain.
+     * @return daftar listing milik pemain (mungkin kosong).
+     * @throws ApiException bila belum linked atau bot mati.
+     */
+    public ListingPage fetchMyListings(String minecraftUuid) throws ApiException {
+        String path = "/listings/mine?minecraftUuid="
+            + URLEncoder.encode(minecraftUuid, StandardCharsets.UTF_8);
+
+        HttpResponse<String> res = send("GET", path, null);
+
+        if (res.statusCode() == 200) {
+            try {
+                // Response shape: { items: [...] } — bungkus ke ListingPage dgn totalPages=1.
+                JsonObject obj = gson.fromJson(res.body(), JsonObject.class);
+                ListingDto[] arr = obj.has("items")
+                    ? gson.fromJson(obj.get("items"), ListingDto[].class)
+                    : new ListingDto[0];
+                ListingPage page = new ListingPage();
+                page.items = new java.util.ArrayList<>(java.util.Arrays.asList(arr != null ? arr : new ListingDto[0]));
+                page.page = 1;
+                page.totalPages = 1;
+                page.total = page.items.size();
+                return page;
+            } catch (Exception e) {
+                throw new ApiException("Gagal membaca daftar listing-mu dari server.");
+            }
+        }
+        throw new ApiException(extractError(res, "Gagal mengambil listing-mu."));
+    }
+
+    /**
+     * POST /players/online — beritahu bot bahwa pemain join (untuk sinkronisasi
+     * presence agar Discord /cancel tahu apakah pemain sedang online).
+     */
+    public void playerJoin(String minecraftUuid) throws ApiException {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("minecraftUuid", minecraftUuid);
+        HttpResponse<String> res = send("POST", "/players/online", gson.toJson(payload));
+        if (res.statusCode() != 200) {
+            throw new ApiException(extractError(res, "Gagal lapor join ke bot."));
+        }
+    }
+
+    /**
+     * DELETE /players/online — beritahu bot bahwa pemain quit.
+     */
+    public void playerQuit(String minecraftUuid) throws ApiException {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("minecraftUuid", minecraftUuid);
+        HttpResponse<String> res = send("DELETE", "/players/online", gson.toJson(payload));
+        if (res.statusCode() != 200) {
+            throw new ApiException(extractError(res, "Gagal lapor quit ke bot."));
+        }
+    }
+
     /** Bangun & kirim request; balut error jaringan jadi ApiException. */
     private HttpResponse<String> send(String method, String path, String body)
             throws ApiException {
@@ -279,7 +442,11 @@ public class ApiClient {
             .header("Authorization", "Bearer " + config.apiSecret);
 
         if ("POST".equals(method)) {
-            builder.POST(HttpRequest.BodyPublishers.ofString(body));
+            builder.POST(HttpRequest.BodyPublishers.ofString(body != null ? body : ""));
+        } else if ("DELETE".equals(method)) {
+            builder.method("DELETE", body != null
+                ? HttpRequest.BodyPublishers.ofString(body)
+                : HttpRequest.BodyPublishers.noBody());
         } else {
             builder.GET();
         }

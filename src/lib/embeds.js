@@ -5,7 +5,7 @@ import {
   ButtonStyle,
   EmbedBuilder,
 } from "discord.js";
-import { Action, buildId, encodeBrowse } from "./ids.js";
+import { Action, buildId, encodeBrowse } from "./ids.js"; // Action.MAKE_OFFER, TX_COMPLETE, BROWSE_PAGE
 import { formatPrice } from "./itemCatalog.js";
 
 // Warna embed per status (hex → angka).
@@ -47,7 +47,13 @@ export function buildListingEmbed(listing) {
         inline: true,
       },
       { name: "Status", value: STATUS_BADGE[listing.status] ?? listing.status, inline: true },
-      { name: "Oleh", value: `<@${listing.creatorId}>`, inline: true },
+      {
+        name: "Oleh",
+        value: listing.creatorName
+          ? `${listing.creatorName} (<@${listing.creatorId}>)`
+          : `<@${listing.creatorId}>`,
+        inline: true,
+      },
     )
     .setFooter({ text: `Listing #${listing.id}` })
     .setTimestamp(listing.createdAt ?? new Date());
@@ -61,7 +67,7 @@ export function buildListingEmbed(listing) {
 
 /**
  * Baris tombol aksi untuk listing.
- * - ACTIVE  → Buy Now / Make Offer.
+ * - ACTIVE  → Make Offer (beli = in-game only via escrow, Fase E2).
  * - PENDING → Mark Completed (jika transactionId diberikan).
  * - lainnya → tidak ada tombol.
  * @param {object} listing
@@ -70,17 +76,7 @@ export function buildListingEmbed(listing) {
  */
 export function buildListingButtons(listing, { transactionId } = {}) {
   if (listing.status === "ACTIVE") {
-    const isSell = listing.type === "SELL";
-    // Untuk listing SELL: pembeli "Buy Now" / "Make Offer".
-    // Untuk listing BUY (mencari): penjual "Penuhi Permintaan" / "Make Offer".
-    const buyNowLabel = isSell ? "Buy Now" : "Penuhi Permintaan";
-
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId(buildId(Action.BUY_NOW, listing.id))
-        .setLabel(buyNowLabel)
-        .setEmoji("🛒")
-        .setStyle(ButtonStyle.Success),
       new ButtonBuilder()
         .setCustomId(buildId(Action.MAKE_OFFER, listing.id))
         .setLabel("Make Offer")
@@ -111,9 +107,12 @@ function formatListingLine(listing) {
   const typeIcon = listing.type === "SELL" ? "🛒" : "🔎";
   const desc = listing.description ? ` — ${listing.description}` : "";
   const price = formatPrice(listing.priceQuantity, listing.priceItemKey);
+  const byLabel = listing.creatorName
+    ? `${listing.creatorName} (<@${listing.creatorId}>)`
+    : `<@${listing.creatorId}>`;
   return (
     `${typeIcon} **#${listing.id}** · **${listing.itemLabel}** ×${listing.quantity}\n` +
-    `   💰 ${price} · oleh <@${listing.creatorId}>${desc}`
+    `   💰 ${price} · oleh ${byLabel}${desc}`
   );
 }
 
