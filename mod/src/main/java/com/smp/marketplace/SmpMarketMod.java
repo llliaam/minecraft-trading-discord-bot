@@ -82,6 +82,7 @@ public class SmpMarketMod implements ModInitializer {
 
         LOGGER.info(
             "SMP Market mod ter-inisialisasi. Command /link /market /marketbuy "
-                + "/myoffers /marketsell /marketcancel /myclaim /mylisting siap (offer via GUI /market).");
+                + "/myoffers /marketsell /marketcancel /myclaim /mylisting siap "
+                + "(/marketbuy & /marketsell via GUI; offer via GUI /market).");
     }
 }

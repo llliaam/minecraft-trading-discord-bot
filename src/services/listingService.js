@@ -61,7 +61,8 @@ export const PAGE_SIZE = 5;
  * @returns {Promise<{items: object[], total: number, page: number, totalPages: number}>}
  */
 export async function browseListings({ type, page = 1 } = {}) {
-  const where = { status: "ACTIVE" };
+  // ACTIVE dan RESERVED keduanya tampil di marketplace (RESERVED terkunci untuk 1 pembeli).
+  const where = { status: { in: ["ACTIVE", "RESERVED"] } };
   if (type) where.type = type;
 
   const total = await db.listing.count({ where });
@@ -93,7 +94,7 @@ export async function searchListings({ query, type, limit = 10 }) {
   // LIKE di SQLite sudah case-insensitive secara default, jadi cukup `contains`.
   // Cari di itemLabel (teks tampilan) — lebih ramah pengguna daripada itemKey.
   const where = {
-    status: "ACTIVE",
+    status: { in: ["ACTIVE", "RESERVED"] },
     itemLabel: { contains: query },
   };
   if (type) where.type = type;
@@ -184,13 +185,13 @@ export async function cancelListing({ listingId, actorId, returnMode = "mailbox"
           "Selesaikan trade-nya, atau koordinasikan dengan pihak lawan.",
       );
     }
-    if (listing.status !== "ACTIVE") {
+    if (listing.status !== "ACTIVE" && listing.status !== "RESERVED") {
       throw new BusinessError("Listing ini sudah tidak aktif.");
     }
 
-    // Klaim: hanya berhasil jika masih ACTIVE (anti balapan).
+    // Klaim: berhasil jika masih ACTIVE atau RESERVED (reservasi belum dibayar = boleh cancel).
     const claimed = await tx.listing.updateMany({
-      where: { id: listingId, status: "ACTIVE" },
+      where: { id: listingId, status: { in: ["ACTIVE", "RESERVED"] } },
       data: { status: "CANCELLED" },
     });
     if (claimed.count === 0) {

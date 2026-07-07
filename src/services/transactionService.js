@@ -34,7 +34,7 @@ export async function purchaseListing({ listingId, buyerId, paymentEscrowRef }) 
     if (listing.type !== "SELL") {
       throw new BusinessError("Listing ini bukan tipe SELL. Gunakan sistem offer untuk listing BUY.");
     }
-    if (listing.status !== "ACTIVE") {
+    if (listing.status !== "ACTIVE" && listing.status !== "RESERVED") {
       throw new BusinessError("Listing ini sudah tidak aktif (mungkin sudah dibeli orang lain).");
     }
     if (!listing.escrowRef) {
@@ -44,10 +44,27 @@ export async function purchaseListing({ listingId, buyerId, paymentEscrowRef }) 
       throw new BusinessError("Kamu tidak bisa membeli listing-mu sendiri.");
     }
 
-    // Klaim atomik: hanya berhasil jika listing masih ACTIVE.
+    // Listing RESERVED: hanya pembeli yang sudah diterima offer-nya yang boleh bayar.
+    if (listing.status === "RESERVED") {
+      if (listing.reservedFor !== buyerId) {
+        throw new BusinessError(
+          "Listing ini sudah direservasi untuk pembeli lain. Hubungi penjual.",
+        );
+      }
+      if (listing.reservedUntil && new Date(listing.reservedUntil) < new Date()) {
+        throw new BusinessError(
+          "Reservasi sudah kedaluwarsa. Listing ini kembali tersedia untuk umum.",
+        );
+      }
+    }
+
+    // Klaim atomik: berhasil jika masih ACTIVE atau RESERVED milik pembeli ini.
     // Kalau dua pembeli klik bersamaan, salah satu dapat count===0 → error ramah.
     const claimed = await tx.listing.updateMany({
-      where: { id: listingId, status: "ACTIVE" },
+      where: {
+        id: listingId,
+        status: { in: ["ACTIVE", "RESERVED"] },
+      },
       data: { status: "COMPLETED" },
     });
     if (claimed.count === 0) {

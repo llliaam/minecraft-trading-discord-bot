@@ -36,25 +36,44 @@ export function buildListingEmbed(listing) {
   const isSell = listing.type === "SELL";
   const typeLabel = isSell ? "🛒 MENJUAL" : "🔎 MENCARI";
 
+  const fields = [
+    { name: "Jumlah", value: String(listing.quantity), inline: true },
+    {
+      name: "Harga",
+      value: formatPrice(listing.priceQuantity, listing.priceItemKey),
+      inline: true,
+    },
+    { name: "Status", value: STATUS_BADGE[listing.status] ?? listing.status, inline: true },
+    {
+      name: "Oleh",
+      value: listing.creatorName
+        ? `${listing.creatorName} (<@${listing.creatorId}>)`
+        : `<@${listing.creatorId}>`,
+      inline: true,
+    },
+  ];
+
+  // Untuk listing RESERVED, tambah info siapa yang direservasi & kapan batas waktu.
+  if (listing.status === "RESERVED" && listing.reservedFor) {
+    fields.push({
+      name: "Direservasi untuk",
+      value: `<@${listing.reservedFor}>`,
+      inline: true,
+    });
+    if (listing.reservedUntil) {
+      const until = new Date(listing.reservedUntil);
+      fields.push({
+        name: "Batas bayar",
+        value: `<t:${Math.floor(until.getTime() / 1000)}:R>`,
+        inline: true,
+      });
+    }
+  }
+
   const embed = new EmbedBuilder()
     .setColor(STATUS_COLOR[listing.status] ?? 0x2b2d31)
     .setTitle(`${typeLabel} — ${listing.itemLabel}`)
-    .addFields(
-      { name: "Jumlah", value: String(listing.quantity), inline: true },
-      {
-        name: "Harga",
-        value: formatPrice(listing.priceQuantity, listing.priceItemKey),
-        inline: true,
-      },
-      { name: "Status", value: STATUS_BADGE[listing.status] ?? listing.status, inline: true },
-      {
-        name: "Oleh",
-        value: listing.creatorName
-          ? `${listing.creatorName} (<@${listing.creatorId}>)`
-          : `<@${listing.creatorId}>`,
-        inline: true,
-      },
-    )
+    .addFields(...fields)
     .setFooter({ text: `Listing #${listing.id}` })
     .setTimestamp(listing.createdAt ?? new Date());
 

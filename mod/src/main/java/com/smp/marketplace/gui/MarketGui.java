@@ -101,8 +101,9 @@ public class MarketGui {
     /** Bangun ikon satu listing (PAPER + nama & detail di lore). */
     private eu.pb4.sgui.api.elements.GuiElementInterface buildListingElement(ListingDto l) {
         boolean sell = "SELL".equals(l.type);
+        boolean reserved = "RESERVED".equals(l.status);
         String tag = sell ? "[JUAL]" : "[BELI]";
-        Formatting tagColor = sell ? Formatting.GREEN : Formatting.AQUA;
+        Formatting tagColor = sell ? (reserved ? Formatting.LIGHT_PURPLE : Formatting.GREEN) : Formatting.AQUA;
 
         GuiElementBuilder b = new GuiElementBuilder(Items.PAPER)
             .setName(Text.literal(tag + " ").formatted(tagColor)
@@ -113,17 +114,28 @@ public class MarketGui {
         if (l.creatorName != null && !l.creatorName.isBlank()) {
             b.addLoreLine(text("Penjual: " + l.creatorName, Formatting.DARK_AQUA));
         }
+        if (reserved) {
+            b.addLoreLine(text("🔒 Direservasi — sedang dinegosiasi", Formatting.LIGHT_PURPLE));
+        }
         if (l.description != null && !l.description.isBlank()) {
             b.addLoreLine(text("\"" + l.description + "\"", Formatting.DARK_GRAY));
         }
         b.addLoreLine(text("#" + l.id, Formatting.DARK_GRAY));
 
-        // Aksi: klik kiri = info (beli langsung menyusul Fase E), klik kanan = tawar.
         b.addLoreLine(text("", Formatting.GRAY));
-        b.addLoreLine(text("Klik kiri: Info / Beli", Formatting.GREEN));
-        b.addLoreLine(text("Klik kanan: Tawar (offer)", Formatting.YELLOW));
+        if (reserved) {
+            b.addLoreLine(text("Listing ini sedang direservasi.", Formatting.RED));
+        } else {
+            b.addLoreLine(text("Klik kiri: Info / Beli", Formatting.GREEN));
+            b.addLoreLine(text("Klik kanan: Tawar (offer)", Formatting.YELLOW));
+        }
 
         b.setCallback((idx, clickType, action, g) -> {
+            if (reserved) {
+                player.sendMessage(
+                    text("Listing ini sedang direservasi untuk pembeli tertentu.", Formatting.RED), false);
+                return;
+            }
             if (clickType.isRight) {
                 onOffer(l);
             } else if (clickType.isLeft) {

@@ -86,9 +86,18 @@ export async function acceptOffer({ offerId, actorId }) {
     }
 
     // Klaim listing: hanya berhasil jika masih ACTIVE (anti balapan dgn Buy Now/accept lain).
+    const reservedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000); // +24 jam
+    const isSellListing = listing.type === "SELL";
+    // Untuk SELL: listing → RESERVED (pembeli wajib setor in-game dalam 24 jam).
+    // Untuk BUY: tidak ada escrow item — langsung PENDING (penjual setor di sesi trade).
+    const nextStatus = isSellListing ? "RESERVED" : "PENDING";
+    const reservationData = isSellListing
+      ? { reservedFor: offer.buyerId, reservedUntil }
+      : {};
+
     const claimed = await tx.listing.updateMany({
       where: { id: listing.id, status: "ACTIVE" },
-      data: { status: "PENDING" },
+      data: { status: nextStatus, ...reservationData },
     });
     if (claimed.count === 0) {
       throw new BusinessError("Listing ini baru saja berubah status.");
@@ -126,8 +135,14 @@ export async function acceptOffer({ offerId, actorId }) {
       },
     });
 
+    const updatedListing = {
+      ...listing,
+      status: nextStatus,
+      ...(isSellListing ? { reservedFor: offer.buyerId, reservedUntil } : {}),
+    };
+
     return {
-      listing: { ...listing, status: "PENDING" },
+      listing: updatedListing,
       offer: { ...offer, status: "ACCEPTED" },
       transaction,
       rejectedOfferIds,

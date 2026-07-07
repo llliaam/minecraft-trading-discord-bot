@@ -1,163 +1,108 @@
-# FASE E — Escrow & Settlement — Progress & Alur Kerja
+# Progress Fase E — Escrow & Settlement
 
-Dokumen khusus Fase E (bagian anti-dupe sistem marketplace). Sumber kebenaran
-arsitektur tetap CLAUDE.md; ini ringkasan progres + alur kerja Fase E saja.
+Sumber kebenaran arsitektur: CLAUDE.md. Dokumen ini ringkasan progres implementasi saja.
 
 ## Aturan Anti-Dupe (NON-NEGOTIABLE)
 1. Mod SATU-SATUNYA pemindah item. Node tak pernah menyentuh ItemStack.
-2. Tiap operasi pindah item punya opId unik & idempoten.
-3. Ledger escrow persist ke disk tiap mutasi (atomic temp + move).
+2. Tiap operasi punya opId unik & idempoten.
+3. Ledger persist atomik tiap mutasi (`smpmarket-escrow.json`).
 4. Startup: ledger mod = sumber kebenaran item.
 
-## Sub-Fase
+## Status Sub-Fase
 
-### ✅ E1 — Ledger escrow + deposit SELL (SELESAI kode+build, teruji manual sebagian)
-- `escrow/EscrowLedger.java` (singleton): deposit/withdraw idempoten via opId,
-  persist atomik tiap mutasi, load saat SERVER_STARTED, backup file rusak.
-  Ledger = `smpmarket-escrow.json` di getGameDir().
-- `escrow/EscrowSlot.java`, `escrow/EscrowException.java`.
-- Deposit awal via `/marketsell` held-item (main+offhand) — SUDAH DIPENSIUNKAN.
-- GOTCHA NBT: `NbtSizeTracker.ofUnlimitedBytes()` (bukan `ofUnlimited()`).
+| Sub-fase | Status | Catatan |
+|----------|--------|---------|
+| E1 — Ledger + deposit SELL | ✅ kode+build | teruji manual sebagian |
+| Revisi SELL GUI + /cancel | ✅ kode+build | BELUM diuji E2E |
+| E2 — Buy/swap atomik | ✅ kode+build | BELUM diuji E2E |
+| E3 — Mailbox + /myclaim | ✅ kode+build | BELUM diuji E2E |
+| Bug fixes + fitur tambahan | ✅ kode+build | BELUM diuji E2E |
+| E4 — Reservasi 24j + sweeper | ✅ kode+build | BELUM diuji E2E |
 
-### ✅ REVISI SELL GUI + /cancel refund (SELESAI kode+build, 2026-07-03; BELUM diuji E2E)
-Menggantikan `/marketsell` held-item dengan alur GUI, + `/cancel` mengembalikan barang.
+---
 
-**Alur SELL baru (2 langkah GUI):**
-1. `/marketsell` (tanpa argumen) → buka `gui/SellDepositGui.java`.
-   - Slot custodial `setSlotRedirect(22, new Slot(SimpleInventory(1),0,0,0))`.
-   - Tombol konfirmasi → ambil barang ke var lokal + `handedOff=true`, cek
-     `/health`, deposit ke ledger (opId), buka picker.
-   - Guard `onClose()`: bila `!handedOff` → kembalikan barang (offerOrDrop).
-2. `gui/PaymentPickerGui.java` — pilih item pembayaran + jumlah.
-   - Katalog PENUH `Registries.ITEM` (cache statis, non-AIR, sorted), paginasi 45/hlm.
-   - Search = `AnvilInputGui` (ADA di sgui 1.6.1) — filter live by id+nama.
-   - Klik item → `SignGui` ketik JUMLAH → `api.createSellListing`.
-   - Refund HANYA saat picker ditutup (`!navigating && !settled`); pindah ke
-     search/sign set `navigating=true` (escrow utuh). `settled` = commit/refund sekali.
+## ✅ E1 — Ledger escrow + deposit SELL
+- `EscrowLedger.java`: deposit/withdraw idempoten via opId, persist atomik, load saat `SERVER_STARTED`.
+- GOTCHA NBT: `NbtSizeTracker.ofUnlimitedBytes()`.
 
-**Alur CANCEL:**
-- In-game `command/MarketCancelCommand.java` (`/marketcancel <listingId>`):
-  REST cancel (returnMode="ingame") → dapat escrowRef → `ledger.withdraw(opId)` →
-  offerOrDrop. escrowRef=null (mis. BUY) → cukup konfirmasi.
-- Discord `/cancel` (returnMode="mailbox", pemain bisa offline): barang TETAP di
-  escrow, dibuat `MailboxItem` (CANCELLED_RETURN, escrowRef sama). MOD TAK DIPANGGIL.
-  Withdraw fisik ditunda ke `/claim` (E3). = murni metadata Node.
+## ✅ Revisi SELL GUI + /cancel
+**SELL:** `/marketsell` → `SellDepositGui` (slot custodial, guard `onClose`, pre-flight `/health`) → `PaymentPickerGui` (katalog penuh `Registries.ITEM`, paginasi, search `AnvilInputGui`, sign jumlah) → `api.createSellListing`.
 
-**Node baru/ubah:**
-- `services/mailboxService.js` (depositToMailbox/getUnclaimedMailbox).
-- `services/listingService.js`: `cancelListing({listingId, actorId, returnMode})`
-  → `{listing, escrowRef}`.
-- `api/handlers.js`: `cancelListingFromGame` + route `POST /listings/cancel`.
-- `api/server.js`: route terdaftar.
-- `commands/cancel.js`: returnMode "mailbox" + info mailbox.
-- `net/ApiClient.java`: `checkHealth()`, `cancelListing(id,uuid)→escrowRef|null`.
-- Schema: model `MailboxItem` + enum `MailboxReason` (db push + generate ✅).
+**Cancel:**
+- In-game `/marketcancel <id>` → returnMode `"ingame"` → Node kembalikan `escrowRef` → mod `withdraw` → `offerOrDrop`.
+- Discord `/cancel` → returnMode `"mailbox"` → barang tetap di escrow, buat `MailboxItem(CANCELLED_RETURN)`. Withdraw fisik saat `/myclaim`.
 
-**Pre-flight /health:** SellDepositGui cek `api.checkHealth()` SEBELUM deposit →
-hindari barang orphan saat bot mati. Refund tetap backstop.
+**Node:** `mailboxService.js`, `cancelListing({returnMode})`, `POST /listings/cancel`. Schema: `MailboxItem` + `MailboxReason`.
 
-**Verifikasi:** gradlew build sukses (jar smpmarket-0.1.0.jar, JDK21), node --check
-lolos, prisma validate/db push/generate sukses. **BELUM diuji E2E manual.**
+## ✅ E2 — Buy/bayar + swap atomik
+**Alur:** Klik kiri listing SELL di `/market` → `PurchaseDepositGui` (slot custodial, validasi item+jumlah **TEPAT**, `handedOff`, pre-flight) → deposit bayar ke ledger → `POST /listings/purchase` → sukses: `withdraw(listing.escrowRef)` → barang ke pembeli; gagal: `withdraw(paymentEscrowRef)` → refund.
 
-**Skenario uji manual (TODO, perlu MC server + bot bareng):**
-- [ ] `/marketsell` → taruh barang → konfirmasi → picker → search anvil → pilih →
-      sign jumlah → listing ACTIVE + embed Discord + item di ledger.
-- [ ] Batal di tiap titik → barang balik: tutup SellDepositGui sebelum konfirmasi;
-      tutup picker; sign kosong (balik picker lalu tutup); REST gagal.
-- [ ] `/marketcancel <id>` (online) → barang balik ke inventory.
-- [ ] Discord `/cancel` SELL → MailboxItem CANCELLED_RETURN dibuat, barang tetap
-      di escrow, embed jadi Dibatalkan.
-- [ ] Bot mati saat konfirmasi setor → pesan "bot tidak bisa dihubungi", barang balik.
+**Node:** `purchaseListing` di `transactionService.js` — klaim atomik `ACTIVE→COMPLETED`, buat `Transaction`, buat `MailboxItem(SOLD_PAYMENT)` untuk penjual. Discord Buy Now **dihapus total**.
 
-### ✅ E2 — Buy/bayar + swap atomik idempoten (SELESAI kode+build, 2026-07-06; BELUM diuji E2E)
+**Mod:** `PurchaseDepositGui.java`, wiring `MarketGui.onInfo` → buka PurchaseDepositGui.
 
-**Alur beli (Fase E2):**
-1. Pemain klik kiri listing SELL di `/market` GUI → buka `gui/PurchaseDepositGui.java`.
-   - Slot custodial `setSlotRedirect(22, Slot(SimpleInventory(1)))` — terima pembayaran.
-   - Info panel menampilkan harga listing (jenis & jumlah wajib disetor).
-   - Tombol konfirmasi → validasi item (key & count), `handedOff=true`, cek /health.
-   - Deposit pembayaran ke ledger (opId) → `api.purchaseListing(listingId, uuid, paymentEscrowRef, purchaseOpId)`.
-   - Sukses → `ledger.withdraw(listing.escrowRef)` → `offerOrDrop` barang ke pembeli.
-   - Gagal REST → `ledger.withdraw(paymentEscrowRef)` → refund pembayaran ke pembeli.
-   - Guard `onClose()`: bila `!handedOff` → kembalikan pembayaran (idempoten).
-2. Node `purchaseListing({listingId, buyerId, paymentEscrowRef})` (di `transactionService.js`):
-   - `db.$transaction`: validasi → klaim atomik ACTIVE→COMPLETED → buat Transaction(COMPLETED) →
-     buat `MailboxItem(SOLD_PAYMENT, escrowRef=paymentEscrowRef)` untuk penjual →
-     return `{listing, transaction, escrowRefToRelease: listing.escrowRef}`.
-3. Handler `purchaseListingFromGame` + route `POST /listings/purchase`.
-   - Update embed → ✅ Selesai. Notifikasi channel: "Terjual! Pembayaran di mailbox penjual."
-4. Discord "Buy Now" tombol DIHAPUS TOTAL — beli kini in-game only via escrow.
-   - `ids.js`: hapus `Action.BUY_NOW/BUY_CONFIRM`.
-   - `buttonRouter.js`: hapus `handleBuyNowPrompt`, `handleBuyConfirm`, import `buyNow`.
-   - `embeds.js`: tombol ACTIVE hanya "Make Offer" (hapus tombol Buy Now).
-   - `transactionService.js`: hapus fungsi `buyNow`.
+## ✅ E3 — Mailbox + claim in-game
+**Alur:** `/myclaim` → `MailboxGui` (GUI 6-baris) → load `GET /mailbox` → klik kiri item → `POST /mailbox/claim` (Node tandai `claimedAt`, return `escrowRef`) → `ledger.withdraw` → `offerOrDrop`. Inventory penuh → item jatuh ke lantai (bukan overflow-ke-mailbox-baru).
 
-**Node baru/ubah:**
-- `services/transactionService.js`: hapus `buyNow`, tambah `purchaseListing`.
-- `api/handlers.js`: tambah `purchaseListingFromGame`.
-- `api/server.js`: route `POST /listings/purchase`.
-- `lib/ids.js`, `interactions/buttonRouter.js`, `lib/embeds.js`: hapus Buy Now Discord.
+**Node:** `claimMailboxItem`, handler `mailboxList` + `mailboxClaim`. **Mod:** `MailboxItemDto`, `MailboxListResult`, `MailboxGui`, `ClaimCommand` (`/myclaim`).
 
-**Mod baru/ubah:**
-- `gui/PurchaseDepositGui.java` (baru): GUI setor pembayaran custodial.
-- `gui/MarketGui.java`: `onInfo` listing SELL → buka `PurchaseDepositGui`.
-- `net/ApiClient.java`: method `purchaseListing(id, uuid, paymentEscrowRef, opId)`.
+## ✅ Bug Fixes + Fitur Tambahan (2026-07-06)
 
-**Verifikasi:** `node --check` semua file JS ✅, `gradlew build` sukses (smpmarket-0.1.0.jar, JDK21) ✅.
-**BELUM diuji E2E manual** (perlu MC server + bot bareng).
+### Fix: validasi jumlah pembayaran harus TEPAT
+`PurchaseDepositGui.java`: ubah `< priceQuantity` → `!= priceQuantity`. Kelebihan item ditolak.
 
-**Skenario uji manual (TODO):**
-- [ ] Klik kiri listing SELL → GUI pembayaran terbuka, info harga tampil.
-- [ ] Taruh item SALAH jenis → ditolak + pesan error "Item salah!".
-- [ ] Taruh item KURANG jumlah → ditolak + pesan error "Jumlah kurang!".
-- [ ] Taruh item TEPAT → konfirmasi → barang pindah ke pembeli, listing COMPLETED, embed Discord update, mailbox penjual terisi.
-- [ ] Tutup GUI sebelum konfirmasi → pembayaran balik ke inventory.
-- [ ] Bot mati saat proses → pesan "bot tidak bisa dihubungi", pembayaran balik.
-- [ ] Dua pembeli klik bersamaan → salah satu dapat "listing baru saja diambil orang lain".
-- [ ] Klik kiri listing BUY → info teks (bukan GUI beli).
+### Fix: Discord /cancel cek online status player
+- `src/lib/onlinePlayers.js` — in-memory Set UUID online.
+- Mod register `ServerPlayConnectionEvents.JOIN/DISCONNECT` → `POST/DELETE /players/online`.
+- `cancel.js` — cek `isOnline(uuid)`: online → instruksikan `/marketcancel <id>` in-game; offline → mailbox.
 
-### ✅ E3 — Mailbox + claim in-game (SELESAI kode+build, 2026-07-06; BELUM diuji E2E)
+### Fitur: `/mylisting` in-game
+- `GET /listings/mine` — listing ACTIVE/PENDING milik pemain.
+- `MyListingGui.java` — GUI daftar listing sendiri, klik kiri = cancel (barang balik ke inventory).
+- `MyListingCommand.java` — `/mylisting`.
 
-**Alur claim:**
-1. Pemain jalankan `/myclaim` → buka `gui/MailboxGui.java` (GUI 6-baris).
-2. GUI load `GET /mailbox?minecraftUuid=...` → tampilkan item menunggu (CHEST per item).
-3. Klik kiri item → thread: `POST /mailbox/claim` (Node tandai `claimedAt`, return `escrowRef`)
-   → main thread: `ledger.withdraw(escrowRef, opId)` → `offerOrDrop` ke inventory.
-4. Inventory penuh → item jatuh ke lantai (bukan mailbox baru — sederhana, tak ada rekursi).
-5. Sukses/gagal → reload GUI agar daftar segar.
+### Fitur: nama MC penjual di marketplace
+- `listingService.js` — `attachCreatorNames()`: batch join `PlayerLink`, tambah field `creatorName`.
+- `embeds.js` — embed + `/browse` tampilkan `"NamaMC (<@discordId>)"`.
+- `MarketGui.java` — lore listing tampilkan `"Penjual: NamaMC"`.
 
-**Anti-dupe:** Node set `claimedAt` SEBELUM return escrowRef → double-claim ditolak
-(`BusinessError`). Crash setelah claim tapi sebelum withdraw → slot tetap di ledger
-(admin recover manual). Withdraw idempoten via opId baru per klaim.
+---
 
-**Node baru/ubah:**
-- `services/mailboxService.js`: tambah `claimMailboxItem({mailboxId, ownerId})`.
-- `api/handlers.js`: tambah `mailboxList` (GET /mailbox) + `mailboxClaim` (POST /mailbox/claim).
-- `api/server.js`: 2 route baru didaftarkan.
+## ✅ E4 — Reservasi 24 jam + Sweeper + Reconciliation (kode+build, 2026-07-07)
 
-**Mod baru/ubah:**
-- `model/MailboxItemDto.java` (baru): DTO satu item mailbox dari REST.
-- `model/MailboxListResult.java` (baru): wrapper list `GET /mailbox`.
-- `net/ApiClient.java`: method `fetchMailbox(uuid)` + `claimMailboxItem(id, uuid)`.
-- `gui/MailboxGui.java` (baru): GUI chest klaim mailbox, render per-item + load/reload async.
-- `command/ClaimCommand.java` (baru): `/myclaim` → buka MailboxGui.
-- `SmpMarketMod.java`: daftarkan `ClaimCommand`.
+### Perubahan Node.js
+- **`offerService.acceptOffer`**: listing SELL → status `RESERVED` (bukan PENDING), set `reservedFor=buyerId`, `reservedUntil=now+24jam`. Listing BUY tetap `PENDING` (tidak ada barang escrow yang perlu dijaga).
+- **`transactionService.purchaseListing`**: terima status `ACTIVE` dan `RESERVED`. Validasi tambahan untuk RESERVED: `buyerId` harus sama `reservedFor`, dan `reservedUntil` belum expired.
+- **`listingService.cancelListing`**: izinkan cancel dari `RESERVED` (reservasi belum dibayar = boleh batal). Update filter `updateMany` ke `status: { in: ["ACTIVE", "RESERVED"] }`.
+- **`listingService.browseListings` + `searchListings`**: include `RESERVED` di filter (listing RESERVED masih tampil di marketplace).
+- **`services/sweeper.js`** (BARU): `expireReservations()` — query + update batch listing RESERVED expired → ACTIVE; `runSweep(client)` — expire + notif Discord; `startSweeper(client)` — startup reconciliation + setInterval 5 menit.
+- **`events/ready.js`**: panggil `startSweeper(client)` saat bot ready.
+- **`lib/embeds.js`**: `buildListingEmbed` tambah field "Direservasi untuk @user" dan "Batas bayar <t:unix:R>" saat status RESERVED.
+- **`api/handlers.js`** (`GET /listings`): ikut kirim field `status`, `reservedFor`, `reservedUntil` ke mod.
 
-**Verifikasi:** `node --check` semua file JS ✅, `gradlew build` sukses ✅.
-**BELUM diuji E2E manual** (perlu MC server + bot bareng).
+### Perubahan Mod Java
+- **`model/ListingDto.java`**: tambah field `reservedFor` dan `reservedUntil`.
+- **`gui/MarketGui.java`**: listing RESERVED tampil badge `[JUAL]` berwarna ungu, lore "🔒 Direservasi", klik diblok + pesan merah.
 
-**Skenario uji manual (TODO):**
-- [ ] `/myclaim` → GUI terbuka, tampilkan item mailbox (SOLD_PAYMENT + CANCELLED_RETURN).
-- [ ] Klik kiri item → item pindah ke inventory, GUI reload tanpa item itu.
-- [ ] `/myclaim` saat mailbox kosong → BARRIER "Mailbox kosong."
-- [ ] Inventory penuh → item jatuh ke lantai, pesan sukses tetap muncul.
-- [ ] Bot mati saat klaim → pesan error, item tetap di mailbox (bisa diklaim ulang).
-- [ ] Klaim dua kali item sama (double-click cepat) → klaim kedua ditolak.
+### Diverifikasi
+- `gradlew build` sukses (JDK 21), `node --check` lolos semua file.
+- **BELUM diuji E2E manual** (perlu MC server + bot bersamaan).
 
-### ⏳ E4 — Reservasi 24 jam + expiry sweeper + rekonsiliasi startup (BELUM)
+---
+
+## TODO Uji Manual (perlu MC server + bot berjalan bersamaan)
+- [ ] SELL: `/marketsell` → setor → picker → sign jumlah → listing aktif di Discord.
+- [ ] Batal di tiap titik SELL → barang balik ke inventory.
+- [ ] Beli: klik listing SELL → taruh bayar TEPAT → barang pindah, mailbox penjual terisi.
+- [ ] Beli: taruh bayar salah jenis/jumlah → ditolak + refund.
+- [ ] `/myclaim` → klaim item → GUI reload.
+- [ ] Discord `/cancel` saat online → instruksi `/marketcancel`; saat offline → mailbox.
+- [ ] `/mylisting` → tampil listing sendiri, klik kiri cancel → barang balik.
+- [ ] Nama MC muncul di embed Discord dan GUI `/market`.
+- [ ] Dua pembeli bersamaan → salah satu dapat "listing baru saja diambil orang lain".
 
 ## GOTCHA
-- Build mod: WAJIB JDK 21 (`org.gradle.java.home` + JAVA_HOME=jdk-21).
-- Prisma Windows: hentikan bot sebelum db push/generate (engine file terkunci).
-- `apiBase` mod = 127.0.0.1 → bot & server MC di komputer sama.
-- sgui 1.6.1: `ClickType.isLeft/isRight` = FIELD bukan method; `AnvilInputGui` ada.
+- Build mod: WAJIB JDK 21 (`org.gradle.java.home` di gradle.properties).
+- Prisma Windows: hentikan bot sebelum `db push/generate` (engine file terkunci).
+- `apiBase` = `127.0.0.1` — bot & server MC di komputer sama.
+- sgui 1.6.1: `ClickType.isLeft/isRight` = FIELD bukan method; `AnvilInputGui` tersedia.
