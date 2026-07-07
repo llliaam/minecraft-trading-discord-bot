@@ -18,7 +18,10 @@ import { BusinessError } from "./transactionService.js";
  *                                          barangnya sudah disetor — Fase E).
  * @returns {Promise<object>} record Listing.
  */
+const LISTING_TTL_DAYS = 30;
+
 export function createListing(input) {
+  const expiresAt = new Date(Date.now() + LISTING_TTL_DAYS * 24 * 60 * 60 * 1000);
   return db.listing.create({
     data: {
       creatorId: input.creatorId,
@@ -30,6 +33,7 @@ export function createListing(input) {
       priceQuantity: input.priceQuantity,
       description: input.description ?? null,
       escrowRef: input.escrowRef ?? null,
+      expiresAt,
     },
   });
 }
@@ -120,7 +124,7 @@ export async function searchListings({ query, type, limit = 10 }) {
  */
 export async function getMyListings(creatorId) {
   const items = await db.listing.findMany({
-    where: { creatorId, status: { in: ["ACTIVE", "PENDING"] } },
+    where: { creatorId, status: { in: ["ACTIVE", "PENDING", "RESERVED"] } },
     orderBy: { createdAt: "desc" },
   });
   return attachCreatorNames(items);

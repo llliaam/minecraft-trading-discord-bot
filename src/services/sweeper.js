@@ -1,11 +1,12 @@
-// Sweeper: job periodik + startup reconciliation untuk E4.
+// Sweeper: job periodik + startup reconciliation.
 // Tanggung jawab:
-//   1. Startup: sweep listing RESERVED yang sudah expired (bot mati saat expired).
-//   2. Periodik (tiap 5 menit): sweep listing RESERVED yang baru expired.
-// Kedua alur memanggil expireReservations() yang sama.
+//   1. Startup: sweep listing RESERVED/ACTIVE yang sudah expired.
+//   2. Periodik (tiap 5 menit): sweep yang baru expired.
 import { db } from "../lib/db.js";
 import { buildListingEmbed, buildListingButtons } from "../lib/embeds.js";
 import { getMarketplaceChannel } from "../lib/marketplace.js";
+import { pushToMod } from "../api/ws.js";
+import { getLinkByDiscord } from "./linkService.js";
 
 const SWEEP_INTERVAL_MS = 5 * 60 * 1000; // 5 menit
 
@@ -88,17 +89,133 @@ async function notifyExpired(client, expired) {
   }
 }
 
+// ─── Auto-expire listing ACTIVE ──────────────────────────────────────────────
+
 /**
- * Jalankan satu siklus sweep (expire + notifikasi).
- * Aman dipanggil berulang (idempoten — hanya expire yang benar-benar sudah lewat).
+ * Expire semua listing ACTIVE/RESERVED yang expiresAt < sekarang.
+ * - Listing BUY: status → EXPIRED langsung.
+ * - Listing SELL dengan escrowRef: status → EXPIRED + buat MailboxItem(CANCELLED_RETURN)
+ *   agar penjual bisa klaim barang in-game (item tetap di escrow mod).
+ * @returns {Promise<object[]>} listing yang baru di-expire.
+ */
+export async function expireListings() {
+  const now = new Date();
+
+  const expiring = await db.listing.findMany({
+    where: {
+      status: { in: ["ACTIVE", "RESERVED"] },
+      expiresAt: { lt: now },
+    },
+  });
+
+  if (expiring.length === 0) return [];
+
+  // Pisah: SELL bereskrow vs lainnya.
+  const withEscrow = expiring.filter((l) => l.escrowRef);
+  const withoutEscrow = expiring.filter((l) => !l.escrowRef);
+
+  // Listing tanpa escrow (BUY, atau SELL belum sempat setor): langsung EXPIRED.
+  if (withoutEscrow.length > 0) {
+    await db.listing.updateMany({
+      where: { id: { in: withoutEscrow.map((l) => l.id) } },
+      data: { status: "EXPIRED" },
+    });
+  }
+
+  // Listing SELL dengan escrow: expire + buat mailbox item.
+  for (const listing of withEscrow) {
+    await db.$transaction(async (tx) => {
+      const claimed = await tx.listing.updateMany({
+        where: { id: listing.id, status: { in: ["ACTIVE", "RESERVED"] } },
+        data: { status: "EXPIRED" },
+      });
+      if (claimed.count === 0) return; // balapan, sudah berubah status lain
+      await tx.mailboxItem.create({
+        data: {
+          ownerId: listing.creatorId,
+          escrowRef: listing.escrowRef,
+          itemKey: listing.itemKey,
+          itemLabel: listing.itemLabel,
+          quantity: listing.quantity,
+          reason: "CANCELLED_RETURN",
+        },
+      });
+    });
+  }
+
+  return expiring;
+}
+
+/**
+ * Notifikasi Discord untuk listing yang baru auto-expire.
+ * @param {import("discord.js").Client} client
+ * @param {object[]} expired  daftar listing (sudah EXPIRED di DB).
+ */
+async function notifyExpiredListings(client, expired) {
+  const channel = await getMarketplaceChannel(client);
+
+  for (const listing of expired) {
+    // Update embed → abu-abu "Kadaluarsa", tanpa tombol.
+    const expiredListing = { ...listing, status: "EXPIRED" };
+    if (listing.messageId && channel) {
+      const msg = await channel.messages.fetch(listing.messageId).catch(() => null);
+      if (msg) {
+        await msg
+          .edit({
+            embeds: [buildListingEmbed(expiredListing)],
+            components: [],
+          })
+          .catch(() => {});
+      }
+    }
+
+    // Ping creator — jika SELL, infokan barang ada di mailbox.
+    if (channel) {
+      const isSell = listing.type === "SELL" && listing.escrowRef;
+      const note = isSell
+        ? " Barang SELL-mu tersimpan di mailbox — klaim in-game dengan `/myclaim`."
+        : "";
+      await channel
+        .send({
+          content:
+            `⏳ <@${listing.creatorId}> Listing **#${listing.id}** (**${listing.itemLabel}**) ` +
+            `sudah kadaluarsa setelah 30 hari.${note}`,
+        })
+        .catch(() => {});
+    }
+
+    // Push notif in-game ke creator.
+    const link = await getLinkByDiscord(listing.creatorId);
+    if (link?.minecraftUuid) {
+      pushToMod("LISTING_EXPIRED", {
+        targetUuid: link.minecraftUuid,
+        listingId: listing.id,
+        itemLabel: listing.itemLabel,
+        hasMail: !!(listing.type === "SELL" && listing.escrowRef),
+      });
+    }
+  }
+}
+
+// ─── Siklus sweep ────────────────────────────────────────────────────────────
+
+/**
+ * Jalankan satu siklus sweep (expire reservasi + expire listing lama + notifikasi).
+ * Aman dipanggil berulang (idempoten).
  * @param {import("discord.js").Client} client
  */
 export async function runSweep(client) {
   try {
-    const expired = await expireReservations();
-    if (expired.length > 0) {
-      console.log(`🧹 Sweeper: ${expired.length} reservasi kedaluwarsa, dikembalikan ke ACTIVE.`);
-      await notifyExpired(client, expired);
+    const expiredReservations = await expireReservations();
+    if (expiredReservations.length > 0) {
+      console.log(`🧹 Sweeper: ${expiredReservations.length} reservasi kedaluwarsa → ACTIVE.`);
+      await notifyExpired(client, expiredReservations);
+    }
+
+    const expiredListings = await expireListings();
+    if (expiredListings.length > 0) {
+      console.log(`🧹 Sweeper: ${expiredListings.length} listing kadaluarsa → EXPIRED.`);
+      await notifyExpiredListings(client, expiredListings);
     }
   } catch (err) {
     console.error("❌ Sweeper error:", err);

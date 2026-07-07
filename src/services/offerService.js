@@ -17,6 +17,11 @@ export async function createOffer({ listingId, buyerId, priceItemKey, priceQuant
   const listing = await db.listing.findUnique({ where: { id: listingId } });
 
   if (!listing) throw new BusinessError("Listing tidak ditemukan.");
+  if (listing.status === "RESERVED") {
+    throw new BusinessError(
+      "Listing ini sedang direservasi untuk pembeli lain. Tunggu 24 jam bila reservasi tidak diselesaikan.",
+    );
+  }
   if (listing.status !== "ACTIVE") {
     throw new BusinessError("Listing ini sudah tidak menerima offer.");
   }

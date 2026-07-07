@@ -9,6 +9,7 @@ import { createServer } from "node:http";
 import { config } from "../lib/config.js";
 import { BusinessError } from "../services/transactionService.js";
 import * as handlers from "./handlers.js";
+import { attachWsServer } from "./ws.js";
 
 // Tabel rute: "METHOD /path" -> handler. Path tanpa query string.
 const ROUTES = {
@@ -139,8 +140,10 @@ export function startApiServer(client) {
   });
 
   // Dengar HANYA di loopback (127.0.0.1) — tidak terekspos ke jaringan.
+  attachWsServer(server);
+
   server.listen(config.apiPort, "127.0.0.1", () => {
-    console.log(`✅ REST server (mod IPC) jalan di http://127.0.0.1:${config.apiPort}`);
+    console.log(`✅ REST+WS server (mod IPC) jalan di http://127.0.0.1:${config.apiPort}`);
   });
 
   server.on("error", (err) => {

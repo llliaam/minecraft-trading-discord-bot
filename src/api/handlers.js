@@ -29,6 +29,8 @@ import {
   buildOfferButtons,
 } from "../lib/embeds.js";
 import { getMarketplaceChannel, updateListingMessage } from "../lib/marketplace.js";
+import { pushToMod } from "./ws.js";
+import { getLinkByDiscord } from "../services/linkService.js";
 
 /** GET /health — cek server hidup. Tidak butuh logika apa pun. */
 export function health() {
@@ -109,6 +111,12 @@ async function resolveDiscordId(minecraftUuid) {
     throw new BusinessError("Akun Minecraft-mu belum tertaut. Jalankan /link di Discord dulu.");
   }
   return link.discordId;
+}
+
+/** Resolve discordId → minecraftUuid (null bila belum linked). */
+async function resolveUuid(discordId) {
+  const link = await getLinkByDiscord(discordId);
+  return link?.minecraftUuid ?? null;
 }
 
 /**
@@ -276,6 +284,18 @@ export async function createOfferFromGame({ body, client }) {
         components: buildOfferButtons(offer),
       })
       .catch(() => {});
+  }
+
+  // Push notif in-game ke penjual (pemilik listing).
+  const sellerUuid = await resolveUuid(listing.creatorId);
+  if (sellerUuid) {
+    pushToMod("OFFER_RECEIVED", {
+      targetUuid: sellerUuid,
+      listingId: listing.id,
+      offerId: offer.id,
+      itemLabel: listing.itemLabel,
+      priceText: formatPrice(offer.priceQuantity, offer.priceItemKey),
+    });
   }
 
   return {
@@ -448,6 +468,17 @@ export async function purchaseListingFromGame({ body, client }) {
       .catch(() => {});
   }
 
+  // Push notif in-game ke penjual: barangnya terjual, pembayaran di mailbox.
+  const sellerUuid = await resolveUuid(listing.creatorId);
+  if (sellerUuid) {
+    pushToMod("ITEM_SOLD", {
+      targetUuid: sellerUuid,
+      listingId: listing.id,
+      itemLabel: listing.itemLabel,
+      quantity: listing.quantity,
+    });
+  }
+
   return {
     status: 200,
     data: {
@@ -482,6 +513,17 @@ export async function respondOffer({ body, client }) {
         .catch(() => {});
     }
 
+    // Push notif in-game ke pembeli: offer diterima, segera bayar.
+    const buyerUuid = await resolveUuid(offer.buyerId);
+    if (buyerUuid) {
+      pushToMod("OFFER_ACCEPTED", {
+        targetUuid: buyerUuid,
+        listingId: listing.id,
+        offerId: offer.id,
+        itemLabel: listing.itemLabel,
+      });
+    }
+
     return { status: 200, data: { ok: true, offerId: offer.id, status: offer.status } };
   }
 
@@ -492,6 +534,15 @@ export async function respondOffer({ body, client }) {
     await channel
       .send(`<@${offer.buyerId}> maaf, offer #${offer.id}-mu ditolak.`)
       .catch(() => {});
+  }
+
+  // Push notif in-game ke pembeli: offer ditolak.
+  const buyerUuid = await resolveUuid(offer.buyerId);
+  if (buyerUuid) {
+    pushToMod("OFFER_REJECTED", {
+      targetUuid: buyerUuid,
+      offerId: offer.id,
+    });
   }
 
   return { status: 200, data: { ok: true, offerId: offer.id, status: offer.status } };

@@ -1,0 +1,11 @@
+// Repositori tempat plugin Gradle diambil (khususnya Fabric Loom, si penerjemah
+// mapping Minecraft <-> kode kita).
+pluginManagement {
+    repositories {
+        maven { url = "https://maven.fabricmc.net/" } // Fabric Loom
+        gradlePluginPortal()
+    }
+}
+
+// Nama proyek Gradle. Bebas, tak harus sama dengan mod id.
+rootProject.name = "smpmarket"
